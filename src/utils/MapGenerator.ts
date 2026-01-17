@@ -3,6 +3,7 @@ export interface MapOptions {
   contrast: number;
   invert: boolean;
   blur: number;
+  tilingBlend: number;
 }
 
 export class MapGenerator {

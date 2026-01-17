@@ -14,6 +14,7 @@ export default function App() {
     contrast: 0,
     invert: false,
     blur: 0,
+    tilingBlend: 0.15,
   });
 
   const canvasRefs = {
@@ -58,7 +59,10 @@ export default function App() {
 
       // Apply seamless if active
       if (seamless) {
-        const seamlessCanvas = TilingProcessor.processSeamless(baseCanvas);
+        const seamlessCanvas = TilingProcessor.processSeamless(
+          baseCanvas,
+          opts.tilingBlend,
+        );
         ctx.drawImage(seamlessCanvas, 0, 0);
         currentImageData = ctx.getImageData(0, 0, img.width, img.height);
       }
@@ -223,6 +227,32 @@ export default function App() {
                   onChange={(e) => setIsSeamless(e.target.checked)}
                 />
               </label>
+            </div>
+
+            <div
+              className="control-group"
+              style={{
+                opacity: isSeamless ? 1 : 0.4,
+                transition: "opacity 0.3s",
+              }}
+            >
+              <label>
+                Seamless Blend <span>{options.tilingBlend.toFixed(2)}</span>
+              </label>
+              <input
+                type="range"
+                min="0.05"
+                max="0.4"
+                step="0.01"
+                disabled={!isSeamless}
+                value={options.tilingBlend}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    tilingBlend: parseFloat(e.target.value),
+                  })
+                }
+              />
             </div>
 
             <div

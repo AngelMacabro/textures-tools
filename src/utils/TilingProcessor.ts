@@ -99,56 +99,116 @@ export class TilingProcessor {
     return tempCanvas; // Returning the offset one for now, blending is better done with a specific feather
   }
 
-  // Refined approach: Offset and then blend the "new" edges in the middle using data from the original
+  /**
+   * Refined approach: Offset-and-blend using a cross-mask.
+   * This provides much better results for structured textures than the radial approach.
+   */
   static processSeamless(
     canvas: HTMLCanvasElement,
-    _blendAmount: number = 0.15,
+    blendAmount: number = 0.2,
   ): HTMLCanvasElement {
     const w = canvas.width;
     const h = canvas.height;
 
+    // 1. Create the offset (shifted) image
+    const offsetCanvas = document.createElement("canvas");
+    offsetCanvas.width = w;
+    offsetCanvas.height = h;
+    const octx = offsetCanvas.getContext("2d")!;
+
+    // Draw shifted quadrants
+    octx.drawImage(canvas, -w / 2, -h / 2);
+    octx.drawImage(canvas, w / 2, -h / 2);
+    octx.drawImage(canvas, -w / 2, h / 2);
+    octx.drawImage(canvas, w / 2, h / 2);
+
+    // 2. Prepare output
     const output = document.createElement("canvas");
     output.width = w;
     output.height = h;
     const ctx = output.getContext("2d")!;
 
-    // 1. Draw the image shifted (the 4-corner tiling)
-    ctx.drawImage(canvas, -w / 2, -h / 2);
-    ctx.drawImage(canvas, w / 2, -h / 2);
-    ctx.drawImage(canvas, -w / 2, h / 2);
-    ctx.drawImage(canvas, w / 2, h / 2);
+    // Start with the offset image
+    ctx.drawImage(offsetCanvas, 0, 0);
 
-    // 2. Blend the original center back
-    const maskCanvas = document.createElement("canvas");
-    maskCanvas.width = w;
-    maskCanvas.height = h;
-    const mctx = maskCanvas.getContext("2d")!;
+    // 3. Create a mask for blending
+    // We want to draw the ORIGINAL image over the seams of the OFFSET image.
+    // The seams of the offset image are in the center.
+    // Wait, better yet: The original image HAS NO SEAMS.
+    // The offset image HAS SEAMS in the middle.
+    // So we draw the original image over the center of the offset image,
+    // but the original image itself becomes the "filling" for the seams.
 
-    const gradient = mctx.createRadialGradient(
-      w / 2,
-      h / 2,
-      Math.min(w, h) * 0.1,
-      w / 2,
-      h / 2,
-      Math.min(w, h) * 0.5,
-    );
-    gradient.addColorStop(0, "rgba(255,255,255,1)");
-    gradient.addColorStop(0.8, "rgba(255,255,255,0.8)");
-    gradient.addColorStop(1, "rgba(255,255,255,0)");
-
-    mctx.fillStyle = gradient;
-    mctx.fillRect(0, 0, w, h);
+    const blendWidth = w * blendAmount;
+    const blendHeight = h * blendAmount;
 
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = w;
     tempCanvas.height = h;
     const tctx = tempCanvas.getContext("2d")!;
 
-    tctx.drawImage(canvas, 0, 0);
-    tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(maskCanvas, 0, 0);
+    // Create a smooth cross-mask
+    // Horizontal part of the cross
+    const hGrad = tctx.createLinearGradient(
+      0,
+      h / 2 - blendHeight,
+      0,
+      h / 2 + blendHeight,
+    );
+    hGrad.addColorStop(0, "rgba(255,255,255,0)");
+    hGrad.addColorStop(0.5, "rgba(255,255,255,1)");
+    hGrad.addColorStop(1, "rgba(255,255,255,0)");
 
-    ctx.drawImage(tempCanvas, 0, 0);
+    // Vertical part of the cross
+    const vGrad = tctx.createLinearGradient(
+      w / 2 - blendWidth,
+      0,
+      w / 2 + blendWidth,
+      0,
+    );
+    vGrad.addColorStop(0, "rgba(255,255,255,0)");
+    vGrad.addColorStop(0.5, "rgba(255,255,255,1)");
+    vGrad.addColorStop(1, "rgba(255,255,255,0)");
+
+    // Draw the original image onto output using these gradients as masks
+    // This is best done by blending strips
+
+    // Draw horizontal seam bridge
+    ctx.globalAlpha = 1.0;
+    const hMask = document.createElement("canvas");
+    hMask.width = w;
+    hMask.height = h;
+    const hMctx = hMask.getContext("2d")!;
+    hMctx.fillStyle = hGrad;
+    hMctx.fillRect(0, 0, w, h);
+
+    const hStrip = document.createElement("canvas");
+    hStrip.width = w;
+    hStrip.height = h;
+    const hSctx = hStrip.getContext("2d")!;
+    hSctx.drawImage(canvas, 0, 0);
+    hSctx.globalCompositeOperation = "destination-in";
+    hSctx.drawImage(hMask, 0, 0);
+
+    ctx.drawImage(hStrip, 0, 0);
+
+    // Draw vertical seam bridge
+    const vMask = document.createElement("canvas");
+    vMask.width = w;
+    vMask.height = h;
+    const vMctx = vMask.getContext("2d")!;
+    vMctx.fillStyle = vGrad;
+    vMctx.fillRect(0, 0, w, h);
+
+    const vStrip = document.createElement("canvas");
+    vStrip.width = w;
+    vStrip.height = h;
+    const vSctx = vStrip.getContext("2d")!;
+    vSctx.drawImage(canvas, 0, 0);
+    vSctx.globalCompositeOperation = "destination-in";
+    vSctx.drawImage(vMask, 0, 0);
+
+    ctx.drawImage(vStrip, 0, 0);
 
     return output;
   }
