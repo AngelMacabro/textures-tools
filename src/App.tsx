@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { MapGenerator } from "./utils/MapGenerator";
 import type { MapOptions } from "./utils/MapGenerator";
 import { TilingProcessor } from "./utils/TilingProcessor";
+import ThreeViewer from "./components/ThreeViewer";
 
 export default function App() {
   const [sourceImage, setSourceImage] = useState<HTMLImageElement | null>(null);
@@ -280,46 +281,55 @@ export default function App() {
           </div>
         </aside>
 
-        <section className="preview-grid">
-          {[
-            { name: "Albedo / Base", key: "base" },
-            { name: "Normal Map", key: "normal" },
-            { name: "Height Map", key: "height" },
-            { name: "Roughness", key: "roughness" },
-            { name: "Ambient Occlusion", key: "ao" },
-          ].map((map) => (
-            <div key={map.key} className="map-card">
-              <div className="map-preview" style={{ overflow: "hidden" }}>
-                <canvas
-                  ref={canvasRefs[map.key as keyof typeof canvasRefs]}
-                  style={{
-                    width: showTiled ? "200%" : "100%",
-                    height: showTiled ? "200%" : "100%",
-                    objectFit: "cover",
-                  }}
-                />
-                {!sourceImage && (
-                  <div style={{ color: "var(--text-dim)" }}>
-                    Waiting for image...
-                  </div>
-                )}
+        <div
+          className="content-area"
+          style={{ display: "flex", flexDirection: "column", gap: "2rem" }}
+        >
+          {sourceImage && (
+            <ThreeViewer canvasRefs={canvasRefs} prefix={prefix} />
+          )}
+
+          <section className="preview-grid">
+            {[
+              { name: "Albedo / Base", key: "base" },
+              { name: "Normal Map", key: "normal" },
+              { name: "Height Map", key: "height" },
+              { name: "Roughness", key: "roughness" },
+              { name: "Ambient Occlusion", key: "ao" },
+            ].map((map) => (
+              <div key={map.key} className="map-card">
+                <div className="map-preview" style={{ overflow: "hidden" }}>
+                  <canvas
+                    ref={canvasRefs[map.key as keyof typeof canvasRefs]}
+                    style={{
+                      width: showTiled ? "200%" : "100%",
+                      height: showTiled ? "200%" : "100%",
+                      objectFit: "cover",
+                    }}
+                  />
+                  {!sourceImage && (
+                    <div style={{ color: "var(--text-dim)" }}>
+                      Waiting for image...
+                    </div>
+                  )}
+                </div>
+                <div className="map-info">
+                  <span className="map-name">{map.name}</span>
+                  <button
+                    className="secondary"
+                    style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem" }}
+                    onClick={() =>
+                      downloadMap(map.key as keyof typeof canvasRefs)
+                    }
+                    disabled={!sourceImage}
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
-              <div className="map-info">
-                <span className="map-name">{map.name}</span>
-                <button
-                  className="secondary"
-                  style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem" }}
-                  onClick={() =>
-                    downloadMap(map.key as keyof typeof canvasRefs)
-                  }
-                  disabled={!sourceImage}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
+            ))}
+          </section>
+        </div>
       </main>
 
       <footer className="footer">

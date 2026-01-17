@@ -53,6 +53,7 @@ h1 {
   font-weight: 800;
   background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   margin-bottom: 0.5rem;
 }
@@ -139,6 +140,12 @@ button:active {
 button.secondary {
   background: rgba(255, 255, 255, 0.1);
   box-shadow: none;
+}
+
+button.secondary.active {
+  background: var(--accent-color);
+  color: white;
+  border-color: transparent;
 }
 
 .preview-grid {
