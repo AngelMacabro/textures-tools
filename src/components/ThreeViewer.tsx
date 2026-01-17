@@ -28,36 +28,27 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
 
     // Scene Setup
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0d0d12);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(
-      45,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
-      1.1,
-      100
-    );
-    camera.position.z = 3;
-
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight,
-    );
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.domElement.style.display = "block";
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+    camera.position.z = 3;
+
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
     mainLight.position.set(5, 5, 5);
     scene.add(mainLight);
 
-    const rimLight = new THREE.PointLight(0x6366f1, 1);
+    const rimLight = new THREE.PointLight(0x6366f1, 0.8);
     rimLight.position.set(-5, -5, -5);
     scene.add(rimLight);
 
@@ -82,25 +73,34 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     };
     animate();
 
-    // Handle Resize
-    const handleResize = () => {
-      if (!containerRef.current) return;
-      camera.aspect =
-        containerRef.current.clientWidth / containerRef.current.clientHeight;
+    // Resize Handling with ResizeObserver
+    const resizeObserver = new ResizeObserver((entries) => {
+      if (!entries[0] || !containerRef.current) return;
+
+      // Use Math.floor to avoid sub-pixel loops
+      const width = Math.floor(entries[0].contentRect.width);
+      const height = Math.floor(entries[0].contentRect.height);
+
+      if (width <= 0 || height <= 0) return;
+
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(
-        containerRef.current.clientWidth,
-        containerRef.current.clientHeight,
-      );
-    };
-    window.addEventListener("resize", handleResize);
+      renderer.setSize(width, height, false); // false to not set style width/height
+      renderer.domElement.style.width = "100%";
+      renderer.domElement.style.height = "100%";
+    });
+
+    resizeObserver.observe(containerRef.current);
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       cancelAnimationFrame(animationFrameId);
       renderer.dispose();
       controls.dispose();
-      if (containerRef.current) {
+      if (
+        containerRef.current &&
+        renderer.domElement.parentNode === containerRef.current
+      ) {
         containerRef.current.removeChild(renderer.domElement);
       }
     };
@@ -123,11 +123,11 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
 
     let geometry: THREE.BufferGeometry;
     if (geometryType === "sphere") {
-      geometry = new THREE.SphereGeometry(1, 64, 64);
+      geometry = new THREE.SphereGeometry(1, 128, 128);
     } else if (geometryType === "cube") {
-      geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+      geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2, 64, 64, 64);
     } else {
-      geometry = new THREE.PlaneGeometry(1.5, 1.5);
+      geometry = new THREE.PlaneGeometry(1.5, 1.5, 128, 128);
     }
 
     const mesh = new THREE.Mesh(geometry, materialRef.current);
@@ -146,9 +146,9 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
         const canvas = canvasRefs[type].current;
         if (canvas) {
           const texture = new THREE.CanvasTexture(canvas);
-          texture.colorSpace = THREE.SRGBColorSpace;
-          if (property === "normalMap") {
-            // Normal maps need Linear space
+          if (property === "map") {
+            texture.colorSpace = THREE.SRGBColorSpace;
+          } else {
             texture.colorSpace = THREE.NoColorSpace;
           }
           (materialRef.current as any)[property] = texture;
@@ -197,47 +197,33 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
   };
 
   return (
-    <div
-      className="panel"
-      style={{
-        flex: 1,
-        minHeight: "250px",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <div
-        className="panel-title"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span>3D Preview</span>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button
-            className={`secondary ${geometryType === "sphere" ? "active" : ""}`}
-            onClick={() => setGeometryType("sphere")}
-            style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem" }}
-          >
-            Sphere
-          </button>
-          <button
-            className={`secondary ${geometryType === "cube" ? "active" : ""}`}
-            onClick={() => setGeometryType("cube")}
-            style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem" }}
-          >
-            Cube
-          </button>
-          <button
-            className={`secondary ${geometryType === "plane" ? "active" : ""}`}
-            onClick={() => setGeometryType("plane")}
-            style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem" }}
-          >
-            Plane
-          </button>
-        </div>
+    <div className="panel three-viewer-container">
+      <div className="panel-title">
+        <span>3D Material Preview</span>
+      </div>
+
+      <div className="viewer-toolbar">
+        <button
+          className={`secondary ${geometryType === "sphere" ? "active" : ""}`}
+          onClick={() => setGeometryType("sphere")}
+          title="Sphere"
+        >
+          ⚪
+        </button>
+        <button
+          className={`secondary ${geometryType === "cube" ? "active" : ""}`}
+          onClick={() => setGeometryType("cube")}
+          title="Cube"
+        >
+          📦
+        </button>
+        <button
+          className={`secondary ${geometryType === "plane" ? "active" : ""}`}
+          onClick={() => setGeometryType("plane")}
+          title="Plane"
+        >
+          ⬜
+        </button>
       </div>
 
       <div
@@ -245,9 +231,9 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
         style={{
           flex: 1,
           position: "relative",
-          borderRadius: "12px",
+          borderRadius: "16px",
           overflow: "hidden",
-          background: "#000000ff",
+          background: "#000",
         }}
       >
         <div
@@ -258,26 +244,22 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
             zIndex: 10,
           }}
         >
-          <button
-            onClick={exportGLB}
-            style={{
-              fontSize: "0.8rem",
-              background: "rgba(99, 102, 241, 0.8)",
-            }}
-          >
-            📦 Export GLB (Blender/Godot)
+          <button onClick={exportGLB} style={{ fontSize: "0.8rem" }}>
+            📦 Export GLB
           </button>
         </div>
       </div>
 
       <div
         style={{
-          fontSize: "0.7rem",
+          fontSize: "0.75rem",
           color: "var(--text-dim)",
-          marginTop: "0.5rem",
+          padding: "0 2rem 1.5rem",
+          textAlign: "center",
+          opacity: 0.6,
         }}
       >
-        Drag to rotate • Scroll to zoom • Right click to pan
+        LMB: Rotate • RMB: Pan • Scroll: Zoom
       </div>
     </div>
   );

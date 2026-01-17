@@ -141,20 +141,25 @@ export default function App() {
             <div className="panel-title">Source Image</div>
             {!sourceImage ? (
               <label className="upload-area">
+                <span>📁</span>
+                <span>Drop Image or Click</span>
+                <p style={{ fontSize: "0.8rem", opacity: 0.5, margin: 0 }}>
+                  PNG, JPG or WebP
+                </p>
                 <input
                   type="file"
-                  hidden
-                  onChange={handleFileUpload}
                   accept="image/*"
+                  onChange={handleFileUpload}
+                  hidden
                 />
-                <span>Click to Upload</span>
               </label>
             ) : (
               <button
                 className="secondary"
                 onClick={() => setSourceImage(null)}
+                style={{ width: "100%", justifyContent: "center" }}
               >
-                Change Image
+                🔄 Replace Texture
               </button>
             )}
           </div>
@@ -196,56 +201,46 @@ export default function App() {
               />
             </div>
 
-            <div
-              className="control-group"
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <label>Invert Roughness</label>
-              <input
-                type="checkbox"
-                checked={options.invert}
-                onChange={(e) =>
-                  setOptions({ ...options, invert: e.target.checked })
-                }
-              />
+            <div className="control-group">
+              <label style={{ flexDirection: "row", alignItems: "center" }}>
+                Invert Roughness
+                <input
+                  type="checkbox"
+                  checked={options.invert}
+                  onChange={(e) =>
+                    setOptions({ ...options, invert: e.target.checked })
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="control-group">
+              <label style={{ flexDirection: "row", alignItems: "center" }}>
+                Make Seamless
+                <input
+                  type="checkbox"
+                  checked={isSeamless}
+                  onChange={(e) => setIsSeamless(e.target.checked)}
+                />
+              </label>
             </div>
 
             <div
               className="control-group"
               style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
+                opacity: isSeamless ? 1 : 0.4,
+                transition: "opacity 0.3s",
               }}
             >
-              <label>Make Seamless</label>
-              <input
-                type="checkbox"
-                checked={isSeamless}
-                onChange={(e) => setIsSeamless(e.target.checked)}
-              />
-            </div>
-
-            <div
-              className="control-group"
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-                opacity: isSeamless ? 1 : 0.5,
-              }}
-            >
-              <label>Preview Tiled (2x2)</label>
-              <input
-                type="checkbox"
-                disabled={!isSeamless}
-                checked={showTiled}
-                onChange={(e) => setShowTiled(e.target.checked)}
-              />
+              <label style={{ flexDirection: "row", alignItems: "center" }}>
+                Preview Tiled (2x2)
+                <input
+                  type="checkbox"
+                  disabled={!isSeamless}
+                  checked={showTiled}
+                  onChange={(e) => setShowTiled(e.target.checked)}
+                />
+              </label>
             </div>
           </div>
 
