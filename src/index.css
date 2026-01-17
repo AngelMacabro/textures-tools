@@ -409,7 +409,7 @@ button.secondary.active {
   overflow: hidden;
   box-shadow: var(--card-shadow);
   position: relative;
-  height: 550px; /* Fixed height to prevent "infinite" growth */
+  height: 500px; /*Fixed height to prevent "infinite" growth */
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -423,7 +423,11 @@ button.secondary.active {
 }
 
 .three-viewer-container canvas {
-  display: block;
+  position: absolute; /* Fix for canvas size */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .viewer-toolbar {

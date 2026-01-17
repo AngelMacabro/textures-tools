@@ -310,9 +310,7 @@ export default function App() {
           className="content-area"
           style={{ display: "flex", flexDirection: "column", gap: "2rem" }}
         >
-          {sourceImage && (
-            <ThreeViewer canvasRefs={canvasRefs} prefix={prefix} />
-          )}
+          <ThreeViewer canvasRefs={canvasRefs} prefix={prefix} />
 
           <section className="preview-grid">
             {[

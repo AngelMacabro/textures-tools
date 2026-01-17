@@ -144,7 +144,7 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
         property: keyof THREE.MeshStandardMaterial,
       ) => {
         const canvas = canvasRefs[type].current;
-        if (canvas) {
+        if (canvas && canvas.width > 0 && canvas.height > 0) {
           const texture = new THREE.CanvasTexture(canvas);
           if (property === "map") {
             texture.colorSpace = THREE.SRGBColorSpace;
@@ -236,6 +236,23 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
           background: "#000",
         }}
       >
+        {(!canvasRefs.base.current || canvasRefs.base.current.width === 0) && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255,255,255,0.3)",
+              fontSize: "0.9rem",
+              pointerEvents: "none",
+              zIndex: 5,
+            }}
+          >
+            Waiting for texture upload...
+          </div>
+        )}
         <div
           style={{
             position: "absolute",
