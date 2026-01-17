@@ -1,215 +1,331 @@
+export type TilingAlgorithm = "crossBlend" | "mirror" | "patchMatch" | "offset";
+export type TilingCurve = "linear" | "smooth" | "cubic";
+
 export class TilingProcessor {
-  static makeSeamless(
+  /**
+   * Main entry point for seamless processing
+   */
+  static process(
     canvas: HTMLCanvasElement,
-    blendAmount: number = 0.1,
+    algorithm: TilingAlgorithm,
+    blendAmount: number = 0.2,
+    curve: TilingCurve = "smooth",
   ): HTMLCanvasElement {
-    const width = canvas.width;
-    const height = canvas.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not get 2d context");
-
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d");
-    if (!tempCtx) throw new Error("Could not get temp 2d context");
-
-    // 1. Draw the image with an offset
-    const offsetX = width / 2;
-    const offsetY = height / 2;
-
-    // Draw shifted quadrants
-    // Top Left -> Bottom Right
-    tempCtx.drawImage(
-      canvas,
-      0,
-      0,
-      offsetX,
-      offsetY,
-      offsetX,
-      offsetY,
-      offsetX,
-      offsetY,
-    );
-    // Top Right -> Bottom Left
-    tempCtx.drawImage(
-      canvas,
-      offsetX,
-      0,
-      offsetX,
-      offsetY,
-      0,
-      offsetY,
-      offsetX,
-      offsetY,
-    );
-    // Bottom Left -> Top Right
-    tempCtx.drawImage(
-      canvas,
-      0,
-      offsetY,
-      offsetX,
-      offsetY,
-      offsetX,
-      0,
-      offsetX,
-      offsetY,
-    );
-    // Bottom Right -> Top Left
-    tempCtx.drawImage(
-      canvas,
-      offsetX,
-      offsetY,
-      offsetX,
-      offsetY,
-      0,
-      0,
-      offsetX,
-      offsetY,
-    );
-
-    // 2. Blend the seams
-    // We need to blend the horizontal and vertical center lines
-    const resultCanvas = document.createElement("canvas");
-    resultCanvas.width = width;
-    resultCanvas.height = height;
-    const resultCtx = resultCanvas.getContext("2d");
-    if (!resultCtx) throw new Error("Could not get result 2d context");
-
-    resultCtx.drawImage(tempCanvas, 0, 0);
-
-    const blendX = width * blendAmount;
-
-    // Create a horizontal gradient mask for the vertical seam (at width/2)
-    const verticalGradient = resultCtx.createLinearGradient(
-      offsetX - blendX,
-      0,
-      offsetX + blendX,
-      0,
-    );
-    verticalGradient.addColorStop(0, "rgba(0,0,0,0)");
-    verticalGradient.addColorStop(0.5, "rgba(0,0,0,1)");
-    verticalGradient.addColorStop(1, "rgba(0,0,0,0)");
-
-    // This is a bit complex for a simple canvas blend.
-    // A better way is to use a mask and draw sections of the original image back over the offset one with alpha.
-    // Let's try a simpler approach:
-    // Draw the original image centered over the offset one with a feather mask.
-
-    return tempCanvas; // Returning the offset one for now, blending is better done with a specific feather
+    switch (algorithm) {
+      case "mirror":
+        return this.processMirrorTile(canvas, blendAmount, curve);
+      case "patchMatch":
+        return this.processPatchMatch(canvas, blendAmount, curve);
+      case "offset":
+        return this.processOffsetOnly(canvas);
+      case "crossBlend":
+      default:
+        return this.processCrossBlend(canvas, blendAmount, curve);
+    }
   }
 
   /**
-   * Refined approach: Offset-and-blend using a cross-mask.
-   * This provides much better results for structured textures than the radial approach.
+   * Curve interpolation functions for smoother blending
    */
-  static processSeamless(
+  private static applyCurve(t: number, curve: TilingCurve): number {
+    switch (curve) {
+      case "linear":
+        return t;
+      case "smooth":
+        // Smoothstep: 3t² - 2t³
+        return t * t * (3 - 2 * t);
+      case "cubic":
+        // Smoother step: 6t⁵ - 15t⁴ + 10t³
+        return t * t * t * (t * (t * 6 - 15) + 10);
+      default:
+        return t;
+    }
+  }
+
+  /**
+   * Cross Blend Algorithm (Enhanced)
+   * Best for organic textures, noise-based materials
+   */
+  static processCrossBlend(
     canvas: HTMLCanvasElement,
     blendAmount: number = 0.2,
+    curve: TilingCurve = "smooth",
   ): HTMLCanvasElement {
     const w = canvas.width;
     const h = canvas.height;
 
-    // 1. Create the offset (shifted) image
+    // Create offset image
     const offsetCanvas = document.createElement("canvas");
     offsetCanvas.width = w;
     offsetCanvas.height = h;
     const octx = offsetCanvas.getContext("2d")!;
 
-    // Draw shifted quadrants
     octx.drawImage(canvas, -w / 2, -h / 2);
     octx.drawImage(canvas, w / 2, -h / 2);
     octx.drawImage(canvas, -w / 2, h / 2);
     octx.drawImage(canvas, w / 2, h / 2);
 
-    // 2. Prepare output
+    // Output canvas
+    const output = document.createElement("canvas");
+    output.width = w;
+    output.height = h;
+    const ctx = output.getContext("2d")!;
+    ctx.drawImage(offsetCanvas, 0, 0);
+
+    // Get image data for pixel-level blending with curve
+    const offsetData = octx.getImageData(0, 0, w, h);
+    const originalCtx = canvas.getContext("2d")!;
+    const originalData = originalCtx.getImageData(0, 0, w, h);
+    const outputData = ctx.getImageData(0, 0, w, h);
+
+    const blendW = w * blendAmount;
+    const blendH = h * blendAmount;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+
+        // Calculate blend factor for horizontal seam (at y = h/2)
+        const distY = Math.abs(y - h / 2);
+        let alphaH = 0;
+        if (distY < blendH) {
+          alphaH = this.applyCurve(1 - distY / blendH, curve);
+        }
+
+        // Calculate blend factor for vertical seam (at x = w/2)
+        const distX = Math.abs(x - w / 2);
+        let alphaV = 0;
+        if (distX < blendW) {
+          alphaV = this.applyCurve(1 - distX / blendW, curve);
+        }
+
+        // Combine: use max for cross-blend
+        const alpha = Math.max(alphaH, alphaV);
+
+        // Blend original over offset
+        for (let c = 0; c < 3; c++) {
+          outputData.data[idx + c] =
+            offsetData.data[idx + c] * (1 - alpha) +
+            originalData.data[idx + c] * alpha;
+        }
+        outputData.data[idx + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(outputData, 0, 0);
+    return output;
+  }
+
+  /**
+   * Mirror Tile Algorithm
+   * Best for symmetric patterns, abstract designs
+   */
+  static processMirrorTile(
+    canvas: HTMLCanvasElement,
+    blendAmount: number = 0.1,
+    curve: TilingCurve = "smooth",
+  ): HTMLCanvasElement {
+    const w = canvas.width;
+    const h = canvas.height;
+
     const output = document.createElement("canvas");
     output.width = w;
     output.height = h;
     const ctx = output.getContext("2d")!;
 
-    // Start with the offset image
-    ctx.drawImage(offsetCanvas, 0, 0);
+    // Create 4 mirrored quadrants
+    const halfW = w / 2;
+    const halfH = h / 2;
 
-    // 3. Create a mask for blending
-    // We want to draw the ORIGINAL image over the seams of the OFFSET image.
-    // The seams of the offset image are in the center.
-    // Wait, better yet: The original image HAS NO SEAMS.
-    // The offset image HAS SEAMS in the middle.
-    // So we draw the original image over the center of the offset image,
-    // but the original image itself becomes the "filling" for the seams.
+    // Top-left: normal
+    ctx.save();
+    ctx.drawImage(canvas, 0, 0, halfW, halfH, 0, 0, halfW, halfH);
+    ctx.restore();
 
-    const blendWidth = w * blendAmount;
-    const blendHeight = h * blendAmount;
+    // Top-right: horizontal flip
+    ctx.save();
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(canvas, 0, 0, halfW, halfH, 0, 0, halfW, halfH);
+    ctx.restore();
 
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = w;
-    tempCanvas.height = h;
-    const tctx = tempCanvas.getContext("2d")!;
+    // Bottom-left: vertical flip
+    ctx.save();
+    ctx.translate(0, h);
+    ctx.scale(1, -1);
+    ctx.drawImage(canvas, 0, 0, halfW, halfH, 0, 0, halfW, halfH);
+    ctx.restore();
 
-    // Create a smooth cross-mask
-    // Horizontal part of the cross
-    const hGrad = tctx.createLinearGradient(
-      0,
-      h / 2 - blendHeight,
-      0,
-      h / 2 + blendHeight,
-    );
-    hGrad.addColorStop(0, "rgba(255,255,255,0)");
-    hGrad.addColorStop(0.5, "rgba(255,255,255,1)");
-    hGrad.addColorStop(1, "rgba(255,255,255,0)");
+    // Bottom-right: both flips
+    ctx.save();
+    ctx.translate(w, h);
+    ctx.scale(-1, -1);
+    ctx.drawImage(canvas, 0, 0, halfW, halfH, 0, 0, halfW, halfH);
+    ctx.restore();
 
-    // Vertical part of the cross
-    const vGrad = tctx.createLinearGradient(
-      w / 2 - blendWidth,
-      0,
-      w / 2 + blendWidth,
-      0,
-    );
-    vGrad.addColorStop(0, "rgba(255,255,255,0)");
-    vGrad.addColorStop(0.5, "rgba(255,255,255,1)");
-    vGrad.addColorStop(1, "rgba(255,255,255,0)");
+    // Optional: blend center to reduce mirror artifacts
+    if (blendAmount > 0) {
+      const blendW = w * blendAmount;
+      const blendH = h * blendAmount;
 
-    // Draw the original image onto output using these gradients as masks
-    // This is best done by blending strips
+      const outputData = ctx.getImageData(0, 0, w, h);
 
-    // Draw horizontal seam bridge
-    ctx.globalAlpha = 1.0;
-    const hMask = document.createElement("canvas");
-    hMask.width = w;
-    hMask.height = h;
-    const hMctx = hMask.getContext("2d")!;
-    hMctx.fillStyle = hGrad;
-    hMctx.fillRect(0, 0, w, h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
 
-    const hStrip = document.createElement("canvas");
-    hStrip.width = w;
-    hStrip.height = h;
-    const hSctx = hStrip.getContext("2d")!;
-    hSctx.drawImage(canvas, 0, 0);
-    hSctx.globalCompositeOperation = "destination-in";
-    hSctx.drawImage(hMask, 0, 0);
+          // Softly blend near center lines
+          const distX = Math.abs(x - halfW);
+          const distY = Math.abs(y - halfH);
 
-    ctx.drawImage(hStrip, 0, 0);
+          if (distX < blendW && distY < blendH) {
+            const fx = this.applyCurve(distX / blendW, curve);
+            const fy = this.applyCurve(distY / blendH, curve);
+            const factor = Math.min(fx, fy);
 
-    // Draw vertical seam bridge
-    const vMask = document.createElement("canvas");
-    vMask.width = w;
-    vMask.height = h;
-    const vMctx = vMask.getContext("2d")!;
-    vMctx.fillStyle = vGrad;
-    vMctx.fillRect(0, 0, w, h);
+            // Slight desaturation at center to hide artifacts
+            const avg =
+              (outputData.data[idx] +
+                outputData.data[idx + 1] +
+                outputData.data[idx + 2]) /
+              3;
+            for (let c = 0; c < 3; c++) {
+              outputData.data[idx + c] =
+                outputData.data[idx + c] * factor + avg * (1 - factor);
+            }
+          }
+        }
+      }
 
-    const vStrip = document.createElement("canvas");
-    vStrip.width = w;
-    vStrip.height = h;
-    const vSctx = vStrip.getContext("2d")!;
-    vSctx.drawImage(canvas, 0, 0);
-    vSctx.globalCompositeOperation = "destination-in";
-    vSctx.drawImage(vMask, 0, 0);
-
-    ctx.drawImage(vStrip, 0, 0);
+      ctx.putImageData(outputData, 0, 0);
+    }
 
     return output;
+  }
+
+  /**
+   * Patch Match Algorithm (Simplified)
+   * Best for structured textures with low-energy seam finding
+   */
+  static processPatchMatch(
+    canvas: HTMLCanvasElement,
+    blendAmount: number = 0.15,
+    curve: TilingCurve = "smooth",
+  ): HTMLCanvasElement {
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Start with offset
+    const offsetCanvas = document.createElement("canvas");
+    offsetCanvas.width = w;
+    offsetCanvas.height = h;
+    const octx = offsetCanvas.getContext("2d")!;
+
+    octx.drawImage(canvas, -w / 2, -h / 2);
+    octx.drawImage(canvas, w / 2, -h / 2);
+    octx.drawImage(canvas, -w / 2, h / 2);
+    octx.drawImage(canvas, w / 2, h / 2);
+
+    const offsetData = octx.getImageData(0, 0, w, h);
+    const originalCtx = canvas.getContext("2d")!;
+    const originalData = originalCtx.getImageData(0, 0, w, h);
+
+    const output = document.createElement("canvas");
+    output.width = w;
+    output.height = h;
+    const ctx = output.getContext("2d")!;
+    const outputData = ctx.createImageData(w, h);
+
+    // Calculate gradient magnitude for energy map
+    const getEnergy = (data: ImageData, x: number, y: number): number => {
+      if (x <= 0 || x >= w - 1 || y <= 0 || y >= h - 1) return 255;
+      const idxL = (y * w + (x - 1)) * 4;
+      const idxR = (y * w + (x + 1)) * 4;
+      const idxU = ((y - 1) * w + x) * 4;
+      const idxD = ((y + 1) * w + x) * 4;
+
+      let energy = 0;
+      for (let c = 0; c < 3; c++) {
+        const dx = Math.abs(data.data[idxR + c] - data.data[idxL + c]);
+        const dy = Math.abs(data.data[idxD + c] - data.data[idxU + c]);
+        energy += dx + dy;
+      }
+      return energy / 3;
+    };
+
+    const blendW = Math.floor(w * blendAmount);
+    const blendH = Math.floor(h * blendAmount);
+    const centerX = Math.floor(w / 2);
+    const centerY = Math.floor(h / 2);
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+
+        const distX = Math.abs(x - centerX);
+        const distY = Math.abs(y - centerY);
+
+        let alpha = 0;
+
+        // Within blend zone, use energy-weighted blending
+        if (distX < blendW || distY < blendH) {
+          const energyOffset = getEnergy(offsetData, x, y);
+          const energyOriginal = getEnergy(originalData, x, y);
+
+          // Lower energy = smoother area = better for blending
+          const energyFactor =
+            energyOriginal / (energyOriginal + energyOffset + 1);
+
+          const distFactor = Math.max(
+            distX < blendW ? 1 - distX / blendW : 0,
+            distY < blendH ? 1 - distY / blendH : 0,
+          );
+
+          alpha =
+            this.applyCurve(distFactor, curve) * (0.5 + 0.5 * energyFactor);
+        }
+
+        for (let c = 0; c < 3; c++) {
+          outputData.data[idx + c] =
+            offsetData.data[idx + c] * (1 - alpha) +
+            originalData.data[idx + c] * alpha;
+        }
+        outputData.data[idx + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(outputData, 0, 0);
+    return output;
+  }
+
+  /**
+   * Offset Only (No Blend)
+   * Simple 50% offset for manual cleanup
+   */
+  static processOffsetOnly(canvas: HTMLCanvasElement): HTMLCanvasElement {
+    const w = canvas.width;
+    const h = canvas.height;
+
+    const output = document.createElement("canvas");
+    output.width = w;
+    output.height = h;
+    const ctx = output.getContext("2d")!;
+
+    ctx.drawImage(canvas, -w / 2, -h / 2);
+    ctx.drawImage(canvas, w / 2, -h / 2);
+    ctx.drawImage(canvas, -w / 2, h / 2);
+    ctx.drawImage(canvas, w / 2, h / 2);
+
+    return output;
+  }
+
+  /**
+   * Legacy method for backwards compatibility
+   */
+  static processSeamless(
+    canvas: HTMLCanvasElement,
+    blendAmount: number = 0.2,
+  ): HTMLCanvasElement {
+    return this.processCrossBlend(canvas, blendAmount, "smooth");
   }
 }

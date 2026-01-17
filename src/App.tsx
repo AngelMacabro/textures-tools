@@ -15,6 +15,8 @@ export default function App() {
     invert: false,
     blur: 0,
     tilingBlend: 0.15,
+    tilingAlgorithm: "crossBlend",
+    tilingCurve: "smooth",
   });
 
   const canvasRefs = {
@@ -59,9 +61,11 @@ export default function App() {
 
       // Apply seamless if active
       if (seamless) {
-        const seamlessCanvas = TilingProcessor.processSeamless(
+        const seamlessCanvas = TilingProcessor.process(
           baseCanvas,
+          opts.tilingAlgorithm,
           opts.tilingBlend,
+          opts.tilingCurve,
         );
         ctx.drawImage(seamlessCanvas, 0, 0);
         currentImageData = ctx.getImageData(0, 0, img.width, img.height);
@@ -236,15 +240,73 @@ export default function App() {
                 transition: "opacity 0.3s",
               }}
             >
+              <label>Seamless Algorithm</label>
+              <select
+                disabled={!isSeamless}
+                value={options.tilingAlgorithm}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    tilingAlgorithm: e.target.value as
+                      | "crossBlend"
+                      | "mirror"
+                      | "patchMatch"
+                      | "offset",
+                  })
+                }
+              >
+                <option value="crossBlend">Cross Blend (Organic)</option>
+                <option value="mirror">Mirror Tile (Symmetric)</option>
+                <option value="patchMatch">Patch Match (Structured)</option>
+                <option value="offset">Offset Only (Manual)</option>
+              </select>
+            </div>
+
+            <div
+              className="control-group"
+              style={{
+                opacity:
+                  isSeamless && options.tilingAlgorithm !== "offset" ? 1 : 0.4,
+                transition: "opacity 0.3s",
+              }}
+            >
+              <label>Blend Curve</label>
+              <select
+                disabled={!isSeamless || options.tilingAlgorithm === "offset"}
+                value={options.tilingCurve}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    tilingCurve: e.target.value as
+                      | "linear"
+                      | "smooth"
+                      | "cubic",
+                  })
+                }
+              >
+                <option value="linear">Linear</option>
+                <option value="smooth">Smooth (Default)</option>
+                <option value="cubic">Cubic (Softest)</option>
+              </select>
+            </div>
+
+            <div
+              className="control-group"
+              style={{
+                opacity:
+                  isSeamless && options.tilingAlgorithm !== "offset" ? 1 : 0.4,
+                transition: "opacity 0.3s",
+              }}
+            >
               <label>
-                Seamless Blend <span>{options.tilingBlend.toFixed(2)}</span>
+                Blend Amount <span>{options.tilingBlend.toFixed(2)}</span>
               </label>
               <input
                 type="range"
                 min="0.05"
                 max="0.4"
                 step="0.01"
-                disabled={!isSeamless}
+                disabled={!isSeamless || options.tilingAlgorithm === "offset"}
                 value={options.tilingBlend}
                 onChange={(e) =>
                   setOptions({

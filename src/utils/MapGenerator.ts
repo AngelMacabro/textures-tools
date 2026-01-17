@@ -4,6 +4,8 @@ export interface MapOptions {
   invert: boolean;
   blur: number;
   tilingBlend: number;
+  tilingAlgorithm: "crossBlend" | "mirror" | "patchMatch" | "offset";
+  tilingCurve: "linear" | "smooth" | "cubic";
 }
 
 export class MapGenerator {

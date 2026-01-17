@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 
 interface ThreeViewerProps {
   canvasRefs: {
@@ -14,14 +15,21 @@ interface ThreeViewerProps {
   prefix: string;
 }
 
+type GeometryType =
+  | "sphere"
+  | "cube"
+  | "roundedBox"
+  | "plane"
+  | "torus"
+  | "cylinder";
+
 export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial | null>(null);
-  const [geometryType, setGeometryType] = useState<"sphere" | "cube" | "plane">(
-    "sphere",
-  );
+  const [geometryType, setGeometryType] = useState<GeometryType>("sphere");
+  const [displacementScale, setDisplacementScale] = useState(0.05);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -33,22 +41,27 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
     renderer.domElement.style.display = "block";
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
-    camera.position.z = 3;
+    camera.position.set(2, 2, 3);
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
 
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
     mainLight.position.set(5, 5, 5);
     scene.add(mainLight);
 
-    const rimLight = new THREE.PointLight(0x6366f1, 0.8);
+    const secondaryLight = new THREE.DirectionalLight(0x6366f1, 0.6);
+    secondaryLight.position.set(-5, 0, 2);
+    scene.add(secondaryLight);
+
+    const rimLight = new THREE.PointLight(0xffffff, 0.8);
     rimLight.position.set(-5, -5, -5);
     scene.add(rimLight);
 
@@ -77,7 +90,6 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     const resizeObserver = new ResizeObserver((entries) => {
       if (!entries[0] || !containerRef.current) return;
 
-      // Use Math.floor to avoid sub-pixel loops
       const width = Math.floor(entries[0].contentRect.width);
       const height = Math.floor(entries[0].contentRect.height);
 
@@ -85,7 +97,7 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
 
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height, false); // false to not set style width/height
+      renderer.setSize(width, height, false);
       renderer.domElement.style.width = "100%";
       renderer.domElement.style.height = "100%";
     });
@@ -122,12 +134,29 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
       });
 
     let geometry: THREE.BufferGeometry;
-    if (geometryType === "sphere") {
-      geometry = new THREE.SphereGeometry(1, 128, 128);
-    } else if (geometryType === "cube") {
-      geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2, 64, 64, 64);
-    } else {
-      geometry = new THREE.PlaneGeometry(1.5, 1.5, 128, 128);
+    switch (geometryType) {
+      case "sphere":
+        geometry = new THREE.SphereGeometry(1, 256, 256);
+        break;
+      case "roundedBox":
+        geometry = new RoundedBoxGeometry(1.2, 1.2, 1.2, 12, 0.1);
+        // Box needs more segments for displacement
+        break;
+      case "cube":
+        geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2, 128, 128, 128);
+        break;
+      case "plane":
+        geometry = new THREE.PlaneGeometry(2, 2, 256, 256);
+        geometry.rotateX(-Math.PI / 2);
+        break;
+      case "torus":
+        geometry = new THREE.TorusKnotGeometry(0.7, 0.25, 300, 64);
+        break;
+      case "cylinder":
+        geometry = new THREE.CylinderGeometry(0.6, 0.6, 1.5, 64, 128);
+        break;
+      default:
+        geometry = new THREE.SphereGeometry(1, 128, 128);
     }
 
     const mesh = new THREE.Mesh(geometry, materialRef.current);
@@ -151,6 +180,7 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
           } else {
             texture.colorSpace = THREE.NoColorSpace;
           }
+          texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           (materialRef.current as any)[property] = texture;
           materialRef.current!.needsUpdate = true;
         }
@@ -162,15 +192,12 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
       setTexture("roughness", "roughnessMap");
       setTexture("ao", "aoMap");
 
-      // Adjustment for displacement
-      materialRef.current.displacementScale = 0.05;
+      materialRef.current.displacementScale = displacementScale;
     };
 
-    // We can't easily listen to canvas pixel changes, so we rely on parent signaling or a short timeout/interval
-    // For now, let's trigger it every 500ms if there's an image
     const interval = setInterval(updateTextures, 1000);
     return () => clearInterval(interval);
-  }, [canvasRefs]);
+  }, [canvasRefs, displacementScale]);
 
   const exportGLB = () => {
     if (!sceneRef.current) return;
@@ -211,11 +238,32 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
           ⚪
         </button>
         <button
+          className={`secondary ${geometryType === "roundedBox" ? "active" : ""}`}
+          onClick={() => setGeometryType("roundedBox")}
+          title="Rounded Box"
+        >
+          🧊
+        </button>
+        <button
           className={`secondary ${geometryType === "cube" ? "active" : ""}`}
           onClick={() => setGeometryType("cube")}
           title="Cube"
         >
           📦
+        </button>
+        <button
+          className={`secondary ${geometryType === "torus" ? "active" : ""}`}
+          onClick={() => setGeometryType("torus")}
+          title="Torus Knot"
+        >
+          🥨
+        </button>
+        <button
+          className={`secondary ${geometryType === "cylinder" ? "active" : ""}`}
+          onClick={() => setGeometryType("cylinder")}
+          title="Cylinder"
+        >
+          🧪
         </button>
         <button
           className={`secondary ${geometryType === "plane" ? "active" : ""}`}
@@ -233,7 +281,7 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
           position: "relative",
           borderRadius: "16px",
           overflow: "hidden",
-          background: "#000",
+          background: "#050510",
         }}
       >
         {(!canvasRefs.base.current || canvasRefs.base.current.width === 0) && (
@@ -253,6 +301,45 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
             Waiting for texture upload...
           </div>
         )}
+
+        {/* Displacement Scale Slider */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: "1rem",
+            left: "1rem",
+            background: "rgba(0,0,0,0.6)",
+            backdropFilter: "blur(10px)",
+            padding: "0.5rem 1rem",
+            borderRadius: "12px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: "1rem",
+            width: "200px",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "0.7rem",
+              color: "var(--text-dim)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Bumpy:
+          </span>
+          <input
+            type="range"
+            min="0"
+            max="0.5"
+            step="0.01"
+            value={displacementScale}
+            onChange={(e) => setDisplacementScale(parseFloat(e.target.value))}
+            style={{ height: "4px" }}
+          />
+        </div>
+
         <div
           style={{
             position: "absolute",
@@ -271,7 +358,7 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
         style={{
           fontSize: "0.75rem",
           color: "var(--text-dim)",
-          padding: "0 2rem 1.5rem",
+          padding: "0.5rem 2rem 1rem",
           textAlign: "center",
           opacity: 0.6,
         }}
