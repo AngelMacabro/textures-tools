@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import JSZip from "jszip";
 import { MapGenerator } from "./utils/MapGenerator";
 import type { MapOptions } from "./utils/MapGenerator";
 import { TilingProcessor } from "./utils/TilingProcessor";
@@ -9,6 +10,7 @@ export default function App() {
   const [isSeamless, setIsSeamless] = useState(false);
   const [showTiled, setShowTiled] = useState(false);
   const [prefix, setPrefix] = useState("texture");
+  const [isDownloading, setIsDownloading] = useState(false);
   const [options, setOptions] = useState<MapOptions>({
     intensity: 1,
     contrast: 0,
@@ -126,12 +128,39 @@ export default function App() {
     link.click();
   };
 
-  const downloadAll = () => {
-    (Object.keys(canvasRefs) as Array<keyof typeof canvasRefs>).forEach(
-      (type) => {
-        downloadMap(type);
-      },
-    );
+  const downloadAll = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder(prefix || "textures");
+
+      const types = Object.keys(canvasRefs) as Array<keyof typeof canvasRefs>;
+
+      for (const type of types) {
+        const canvas = canvasRefs[type].current;
+        if (canvas) {
+          const blob = await new Promise<Blob | null>((resolve) =>
+            canvas.toBlob((b) => resolve(b), "image/png"),
+          );
+          if (blob) {
+            folder?.file(`${prefix}_${type}.png`, blob);
+          }
+        }
+      }
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(content);
+      link.download = `${prefix || "textures"}_pack.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (error) {
+      console.error("Error generating ZIP:", error);
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -357,13 +386,18 @@ export default function App() {
             </div>
             <button
               onClick={downloadAll}
-              disabled={!sourceImage}
+              disabled={!sourceImage || isDownloading}
               style={{
                 marginTop: "1rem",
-                background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+                background: isDownloading
+                  ? "rgba(255,255,255,0.1)"
+                  : "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)",
+                cursor: isDownloading ? "wait" : "pointer",
               }}
             >
-              🚀 Download All Maps
+              {isDownloading
+                ? "📦 Generating ZIP..."
+                : "🚀 Download All Maps (.zip)"}
             </button>
           </div>
         </aside>
