@@ -6,6 +6,13 @@ export interface MapOptions {
   tilingBlend: number;
   tilingAlgorithm: "crossBlend" | "mirror" | "patchMatch" | "offset";
   tilingCurve: "linear" | "smooth" | "cubic";
+  // Advanced Features
+  brightness: number;
+  saturation: number;
+  hue: number;
+  isMetallic: boolean;
+  metalnessBase: number;
+  delightAmount: number;
 }
 
 export class MapGenerator {
@@ -38,18 +45,97 @@ export class MapGenerator {
     return output;
   }
 
+  static applyColorCorrection(
+    imageData: ImageData,
+    opts: Partial<MapOptions>,
+  ): ImageData {
+    const output = new ImageData(
+      new Uint8ClampedArray(imageData.data),
+      imageData.width,
+      imageData.height,
+    );
+    const data = output.data;
+
+    const brightness = (opts.brightness || 0) / 100;
+    const contrast = (opts.contrast || 0) / 100;
+    const saturation = (opts.saturation || 0) / 100;
+    const hue = opts.hue || 0;
+    const delight = (opts.delightAmount || 0) / 100;
+
+    const contrastFactor =
+      (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
+
+    for (let i = 0; i < data.length; i += 4) {
+      let r = data[i];
+      let g = data[i + 1];
+      let b = data[i + 2];
+
+      // 1. Basic Delighting (Simulated by normalizing highlights)
+      if (delight > 0) {
+        const avg = (r + g + b) / 3;
+        r = r + (avg - r) * delight * 0.5;
+        g = g + (avg - g) * delight * 0.5;
+        b = b + (avg - b) * delight * 0.5;
+      }
+
+      // 2. Brightness
+      r += brightness * 255;
+      g += brightness * 255;
+      b += brightness * 255;
+
+      // 3. Contrast
+      r = contrastFactor * (r - 128) + 128;
+      g = contrastFactor * (g - 128) + 128;
+      b = contrastFactor * (b - 128) + 128;
+
+      // 4. Saturation & Hue (Simplified conversion)
+      const gray = 0.2989 * r + 0.587 * g + 0.114 * b;
+      r = gray + (r - gray) * (1 + saturation);
+      g = gray + (g - gray) * (1 + saturation);
+      b = gray + (b - gray) * (1 + saturation);
+
+      // Simple Hue rotation (approximation)
+      if (Math.abs(hue) > 0) {
+        const angle = (hue * Math.PI) / 180;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        const nr =
+          (0.213 + cosA * 0.787 - sinA * 0.213) * r +
+          (0.715 - cosA * 0.715 - sinA * 0.715) * g +
+          (0.072 - cosA * 0.072 + sinA * 0.928) * b;
+        const ng =
+          (0.213 - cosA * 0.213 + sinA * 0.143) * r +
+          (0.715 + cosA * 0.285 + sinA * 0.14) * g +
+          (0.072 - cosA * 0.072 - sinA * 0.283) * b;
+        const nb =
+          (0.213 - cosA * 0.213 - sinA * 0.787) * r +
+          (0.715 - cosA * 0.715 + sinA * 0.715) * g +
+          (0.072 + cosA * 0.928 + sinA * 0.072) * b;
+        r = nr;
+        g = ng;
+        b = nb;
+      }
+
+      data[i] = Math.min(255, Math.max(0, r));
+      data[i + 1] = Math.min(255, Math.max(0, g));
+      data[i + 2] = Math.min(255, Math.max(0, b));
+    }
+    return output;
+  }
+
   static generateHeightMap(
     imageData: ImageData,
-    contrast: number = 1,
+    contrast: number = 0,
   ): ImageData {
     const gray = this.toGrayscale(imageData);
     const data = gray.data;
-    const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+    // Map contrast range -1 to 1 to Sobel-friendly range
+    const c = contrast * 128;
+    const factor = (259 * (c + 255)) / (255 * (259 - c));
 
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = factor * (data[i] - 128) + 128;
-      data[i + 1] = factor * (data[i + 1] - 128) + 128;
-      data[i + 2] = factor * (data[i + 2] - 128) + 128;
+      const val = factor * (data[i] - 128) + 128;
+      data[i] = data[i + 1] = data[i + 2] = Math.min(255, Math.max(0, val));
     }
     return gray;
   }
@@ -68,7 +154,6 @@ export class MapGenerator {
       for (let x = 0; x < width; x++) {
         const idx = (y * width + x) * 4;
 
-        // Sobel filter
         const xLeft = x > 0 ? x - 1 : x;
         const xRight = x < width - 1 ? x + 1 : x;
         const yUp = y > 0 ? y - 1 : y;
@@ -87,15 +172,10 @@ export class MapGenerator {
         const dy = val02 + 2 * val12 + val22 - (val00 + 2 * val10 + val20);
         const dz = 255 / strength;
 
-        // Normalize
         const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        const nx = dx / len;
-        const ny = dy / len;
-        const nz = dz / len;
-
-        outData[idx] = (nx * 0.5 + 0.5) * 255;
-        outData[idx + 1] = (ny * 0.5 + 0.5) * 255;
-        outData[idx + 2] = nz * 255;
+        outData[idx] = ((dx / len) * 0.5 + 0.5) * 255;
+        outData[idx + 1] = ((dy / len) * 0.5 + 0.5) * 255;
+        outData[idx + 2] = (dz / len) * 255;
         outData[idx + 3] = 255;
       }
     }
@@ -111,16 +191,13 @@ export class MapGenerator {
 
     if (invert) {
       for (let i = 0; i < data.length; i += 4) {
-        data[i] = 255 - data[i];
-        data[i + 1] = 255 - data[i + 1];
-        data[i + 2] = 255 - data[i + 2];
+        data[i] = data[i + 1] = data[i + 2] = 255 - data[i];
       }
     }
     return gray;
   }
 
   static generateAOMap(imageData: ImageData, strength: number = 1): ImageData {
-    // Basic AO implementation based on local height variance
     const width = imageData.width;
     const height = imageData.height;
     const gray = this.toGrayscale(imageData).data;
@@ -134,7 +211,6 @@ export class MapGenerator {
         let sum = 0;
         let count = 0;
 
-        // Simple kernel for AO approximation
         for (let ky = -2; ky <= 2; ky++) {
           for (let kx = -2; kx <= 2; kx++) {
             const ny = Math.min(height - 1, Math.max(0, y + ky));
@@ -145,12 +221,60 @@ export class MapGenerator {
         }
 
         const avg = sum / count;
-        const diff = Math.max(0, avg - center) * strength;
+        const diff = Math.max(0, avg - center) * (strength * 2);
         const val = Math.max(0, 255 - diff);
 
-        outData[idx] = val;
-        outData[idx + 1] = val;
-        outData[idx + 2] = val;
+        outData[idx] = outData[idx + 1] = outData[idx + 2] = val;
+        outData[idx + 3] = 255;
+      }
+    }
+    return output;
+  }
+
+  static generateMetalnessMap(
+    imageData: ImageData,
+    isMetallic: boolean,
+    baseVal: number,
+  ): ImageData {
+    const output = new ImageData(imageData.width, imageData.height);
+    const outData = output.data;
+    const gray = this.toGrayscale(imageData).data;
+
+    for (let i = 0; i < outData.length; i += 4) {
+      // If it's a metallic surface, dark areas are likely non-metal (dirt/rust), bright are metal
+      const val = isMetallic ? (gray[i] * baseVal) / 255 : 0;
+      outData[i] = outData[i + 1] = outData[i + 2] = val;
+      outData[i + 3] = 255;
+    }
+    return output;
+  }
+
+  static generateCurvatureMap(normalData: ImageData): ImageData {
+    const width = normalData.width;
+    const height = normalData.height;
+    const data = normalData.data;
+    const output = new ImageData(width, height);
+    const outData = output.data;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+
+        const xLeft = x > 0 ? x - 1 : x;
+        const xRight = x < width - 1 ? x + 1 : x;
+        const yUp = y > 0 ? y - 1 : y;
+        const yDown = y < height - 1 ? y + 1 : y;
+
+        const nxL = (data[(y * width + xLeft) * 4] / 255) * 2 - 1;
+        const nxR = (data[(y * width + xRight) * 4] / 255) * 2 - 1;
+        const nyU = (data[(yUp * width + x) * 4 + 1] / 255) * 2 - 1;
+        const nyD = (data[(yDown * width + x) * 4 + 1] / 255) * 2 - 1;
+
+        // Curvature is the divergence of the normal field
+        const curv = (nxR - nxL + (nyD - nyU)) * 0.5;
+        const val = (curv * 0.5 + 0.5) * 255;
+
+        outData[idx] = outData[idx + 1] = outData[idx + 2] = val;
         outData[idx + 3] = 255;
       }
     }

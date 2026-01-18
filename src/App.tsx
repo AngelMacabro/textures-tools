@@ -19,6 +19,12 @@ export default function App() {
     tilingBlend: 0.15,
     tilingAlgorithm: "crossBlend",
     tilingCurve: "smooth",
+    brightness: 0,
+    saturation: 0,
+    hue: 0,
+    isMetallic: false,
+    metalnessBase: 1.0,
+    delightAmount: 0,
   });
 
   const canvasRefs = {
@@ -27,6 +33,8 @@ export default function App() {
     height: useRef<HTMLCanvasElement>(null),
     roughness: useRef<HTMLCanvasElement>(null),
     ao: useRef<HTMLCanvasElement>(null),
+    metalness: useRef<HTMLCanvasElement>(null),
+    curvature: useRef<HTMLCanvasElement>(null),
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,65 +57,78 @@ export default function App() {
     (img: HTMLImageElement, opts: MapOptions, seamless: boolean) => {
       if (!img) return;
 
-      // Initialize base canvas
-      const baseCanvas = canvasRefs.base.current;
-      if (!baseCanvas) return;
+      const offscreen = document.createElement("canvas");
+      offscreen.width = img.width;
+      offscreen.height = img.height;
+      const oCtx = offscreen.getContext("2d");
+      if (!oCtx) return;
+      oCtx.drawImage(img, 0, 0);
 
-      baseCanvas.width = img.width;
-      baseCanvas.height = img.height;
-      const ctx = baseCanvas.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
+      const baseRef = canvasRefs.base.current;
+      if (!baseRef) return;
+      baseRef.width = img.width;
+      baseRef.height = img.height;
+      const bCtx = baseRef.getContext("2d");
+      if (!bCtx) return;
 
-      let currentImageData = ctx.getImageData(0, 0, img.width, img.height);
-
-      // Apply seamless if active
       if (seamless) {
         const seamlessCanvas = TilingProcessor.process(
-          baseCanvas,
+          offscreen,
           opts.tilingAlgorithm,
           opts.tilingBlend,
           opts.tilingCurve,
         );
-        ctx.drawImage(seamlessCanvas, 0, 0);
-        currentImageData = ctx.getImageData(0, 0, img.width, img.height);
+        oCtx.drawImage(seamlessCanvas, 0, 0);
       }
 
-      // Generate Height Map
+      const fullImgData = oCtx.getImageData(0, 0, img.width, img.height);
+      const correctedData = MapGenerator.applyColorCorrection(
+        fullImgData,
+        opts,
+      );
+      bCtx.putImageData(correctedData, 0, 0);
+
+      const currentImageData = correctedData;
+
       const heightData = MapGenerator.generateHeightMap(
         currentImageData,
         opts.contrast,
       );
-      if (canvasRefs.height.current) {
+      if (canvasRefs.height.current)
         MapGenerator.putImageData(canvasRefs.height.current, heightData);
-      }
 
-      // Generate Normal Map
       const normalData = MapGenerator.generateNormalMap(
         currentImageData,
         opts.intensity,
       );
-      if (canvasRefs.normal.current) {
+      if (canvasRefs.normal.current)
         MapGenerator.putImageData(canvasRefs.normal.current, normalData);
-      }
 
-      // Generate Roughness Map
       const roughnessData = MapGenerator.generateRoughnessMap(
         currentImageData,
         opts.invert,
       );
-      if (canvasRefs.roughness.current) {
+      if (canvasRefs.roughness.current)
         MapGenerator.putImageData(canvasRefs.roughness.current, roughnessData);
-      }
 
-      // Generate AO Map
       const aoData = MapGenerator.generateAOMap(
         currentImageData,
         opts.intensity,
       );
-      if (canvasRefs.ao.current) {
+      if (canvasRefs.ao.current)
         MapGenerator.putImageData(canvasRefs.ao.current, aoData);
-      }
+
+      const metalData = MapGenerator.generateMetalnessMap(
+        currentImageData,
+        opts.isMetallic,
+        opts.metalnessBase,
+      );
+      if (canvasRefs.metalness.current)
+        MapGenerator.putImageData(canvasRefs.metalness.current, metalData);
+
+      const curvatureData = MapGenerator.generateCurvatureMap(normalData);
+      if (canvasRefs.curvature.current)
+        MapGenerator.putImageData(canvasRefs.curvature.current, curvatureData);
     },
     [],
   );
@@ -135,7 +156,6 @@ export default function App() {
     try {
       const zip = new JSZip();
       const folder = zip.folder(prefix || "textures");
-
       const types = Object.keys(canvasRefs) as Array<keyof typeof canvasRefs>;
 
       for (const type of types) {
@@ -163,13 +183,73 @@ export default function App() {
     }
   };
 
+  const applyPreset = (name: string) => {
+    const presets: Record<string, Partial<MapOptions>> = {
+      Gold: {
+        isMetallic: true,
+        metalnessBase: 1.0,
+        intensity: 0.3,
+        contrast: 0.1,
+        invert: false,
+        brightness: 5,
+        saturation: 10,
+      },
+      Steel: {
+        isMetallic: true,
+        metalnessBase: 0.8,
+        intensity: 1.2,
+        contrast: 0.2,
+        invert: false,
+        brightness: 0,
+        saturation: -50,
+      },
+      Concrete: {
+        isMetallic: false,
+        metalnessBase: 0,
+        intensity: 2.0,
+        contrast: 0.4,
+        invert: false,
+        brightness: -5,
+        saturation: -20,
+      },
+      Plastic: {
+        isMetallic: false,
+        metalnessBase: 0,
+        intensity: 0.8,
+        contrast: 0.1,
+        invert: false,
+        brightness: 0,
+        saturation: 0,
+      },
+      Wood: {
+        isMetallic: false,
+        metalnessBase: 0,
+        intensity: 1.5,
+        contrast: 0.3,
+        invert: false,
+        brightness: 0,
+        saturation: 10,
+      },
+      Fabric: {
+        isMetallic: false,
+        metalnessBase: 0,
+        intensity: 0.6,
+        contrast: 0.0,
+        invert: false,
+        brightness: 5,
+        saturation: 0,
+      },
+    };
+    if (presets[name]) {
+      setOptions({ ...options, ...presets[name] });
+    }
+  };
+
   return (
     <div className="app-container">
       <header>
         <h1>Texture Map Generator</h1>
-        <p className="subtitle">
-          Create PBR materials for Blender & Godot instantly
-        </p>
+        <p className="subtitle">Create professional PBR materials instantly</p>
       </header>
 
       <main className="main-layout">
@@ -202,8 +282,32 @@ export default function App() {
           </div>
 
           <div className="panel">
-            <div className="panel-title">Map Controls</div>
+            <div className="panel-title">Material Presets</div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "0.5rem",
+              }}
+            >
+              {["Gold", "Steel", "Concrete", "Plastic", "Wood", "Fabric"].map(
+                (preset) => (
+                  <button
+                    key={preset}
+                    className="secondary preset-btn"
+                    onClick={() => applyPreset(preset)}
+                    style={{ fontSize: "0.75rem", padding: "0.5rem" }}
+                    disabled={!sourceImage}
+                  >
+                    {preset}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
 
+          <div className="panel">
+            <div className="panel-title">Map Controls</div>
             <div className="control-group">
               <label>
                 Normal Intensity <span>{options.intensity.toFixed(1)}</span>
@@ -225,18 +329,57 @@ export default function App() {
 
             <div className="control-group">
               <label>
-                Height Contrast <span>{options.contrast}</span>
+                Height Contrast{" "}
+                <span>{(options.contrast * 100).toFixed(0)}%</span>
               </label>
               <input
                 type="range"
-                min="-100"
-                max="100"
+                min="-1"
+                max="1"
+                step="0.05"
                 value={options.contrast}
                 onChange={(e) =>
-                  setOptions({ ...options, contrast: parseInt(e.target.value) })
+                  setOptions({
+                    ...options,
+                    contrast: parseFloat(e.target.value),
+                  })
                 }
               />
             </div>
+
+            <div className="control-group">
+              <label style={{ flexDirection: "row", alignItems: "center" }}>
+                Metallic Surface
+                <input
+                  type="checkbox"
+                  checked={options.isMetallic}
+                  onChange={(e) =>
+                    setOptions({ ...options, isMetallic: e.target.checked })
+                  }
+                />
+              </label>
+            </div>
+
+            {options.isMetallic && (
+              <div className="control-group" style={{ transition: "all 0.3s" }}>
+                <label>
+                  Metalness Base <span>{options.metalnessBase.toFixed(2)}</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={options.metalnessBase}
+                  onChange={(e) =>
+                    setOptions({
+                      ...options,
+                      metalnessBase: parseFloat(e.target.value),
+                    })
+                  }
+                />
+              </div>
+            )}
 
             <div className="control-group">
               <label style={{ flexDirection: "row", alignItems: "center" }}>
@@ -250,7 +393,83 @@ export default function App() {
                 />
               </label>
             </div>
+          </div>
 
+          <div className="panel">
+            <div className="panel-title">Color Adjustment</div>
+            <div className="control-group">
+              <label>
+                Delighting <span>{options.delightAmount.toFixed(0)}</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={options.delightAmount}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    delightAmount: parseFloat(e.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="control-group">
+              <label>
+                Brightness <span>{options.brightness.toFixed(0)}</span>
+              </label>
+              <input
+                type="range"
+                min="-100"
+                max="100"
+                step="1"
+                value={options.brightness}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    brightness: parseFloat(e.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="control-group">
+              <label>
+                Saturation <span>{options.saturation.toFixed(0)}</span>
+              </label>
+              <input
+                type="range"
+                min="-100"
+                max="100"
+                step="1"
+                value={options.saturation}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    saturation: parseFloat(e.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="control-group">
+              <label>
+                Hue <span>{options.hue.toFixed(0)}°</span>
+              </label>
+              <input
+                type="range"
+                min="-180"
+                max="180"
+                step="1"
+                value={options.hue}
+                onChange={(e) =>
+                  setOptions({ ...options, hue: parseFloat(e.target.value) })
+                }
+              />
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Seamless Tools</div>
             <div className="control-group">
               <label style={{ flexDirection: "row", alignItems: "center" }}>
                 Make Seamless
@@ -262,107 +481,76 @@ export default function App() {
               </label>
             </div>
 
-            <div
-              className="control-group"
-              style={{
-                opacity: isSeamless ? 1 : 0.4,
-                transition: "opacity 0.3s",
-              }}
-            >
-              <label>Seamless Algorithm</label>
-              <select
-                disabled={!isSeamless}
-                value={options.tilingAlgorithm}
-                onChange={(e) =>
-                  setOptions({
-                    ...options,
-                    tilingAlgorithm: e.target.value as
-                      | "crossBlend"
-                      | "mirror"
-                      | "patchMatch"
-                      | "offset",
-                  })
-                }
-              >
-                <option value="crossBlend">Cross Blend (Organic)</option>
-                <option value="mirror">Mirror Tile (Symmetric)</option>
-                <option value="patchMatch">Patch Match (Structured)</option>
-                <option value="offset">Offset Only (Manual)</option>
-              </select>
-            </div>
-
-            <div
-              className="control-group"
-              style={{
-                opacity:
-                  isSeamless && options.tilingAlgorithm !== "offset" ? 1 : 0.4,
-                transition: "opacity 0.3s",
-              }}
-            >
-              <label>Blend Curve</label>
-              <select
-                disabled={!isSeamless || options.tilingAlgorithm === "offset"}
-                value={options.tilingCurve}
-                onChange={(e) =>
-                  setOptions({
-                    ...options,
-                    tilingCurve: e.target.value as
-                      | "linear"
-                      | "smooth"
-                      | "cubic",
-                  })
-                }
-              >
-                <option value="linear">Linear</option>
-                <option value="smooth">Smooth (Default)</option>
-                <option value="cubic">Cubic (Softest)</option>
-              </select>
-            </div>
-
-            <div
-              className="control-group"
-              style={{
-                opacity:
-                  isSeamless && options.tilingAlgorithm !== "offset" ? 1 : 0.4,
-                transition: "opacity 0.3s",
-              }}
-            >
-              <label>
-                Blend Amount <span>{options.tilingBlend.toFixed(2)}</span>
-              </label>
-              <input
-                type="range"
-                min="0.05"
-                max="0.4"
-                step="0.01"
-                disabled={!isSeamless || options.tilingAlgorithm === "offset"}
-                value={options.tilingBlend}
-                onChange={(e) =>
-                  setOptions({
-                    ...options,
-                    tilingBlend: parseFloat(e.target.value),
-                  })
-                }
-              />
-            </div>
-
-            <div
-              className="control-group"
-              style={{
-                opacity: isSeamless ? 1 : 0.4,
-                transition: "opacity 0.3s",
-              }}
-            >
-              <label style={{ flexDirection: "row", alignItems: "center" }}>
-                Preview Tiled (2x2)
-                <input
-                  type="checkbox"
-                  disabled={!isSeamless}
-                  checked={showTiled}
-                  onChange={(e) => setShowTiled(e.target.checked)}
-                />
-              </label>
-            </div>
+            {isSeamless && (
+              <>
+                <div className="control-group">
+                  <label>Algorithm</label>
+                  <select
+                    value={options.tilingAlgorithm}
+                    onChange={(e) =>
+                      setOptions({
+                        ...options,
+                        tilingAlgorithm: e.target.value as any,
+                      })
+                    }
+                  >
+                    <option value="crossBlend">Cross Blend</option>
+                    <option value="mirror">Mirror Tile</option>
+                    <option value="patchMatch">Patch Match</option>
+                    <option value="offset">Offset Only</option>
+                  </select>
+                </div>
+                {options.tilingAlgorithm !== "offset" && (
+                  <>
+                    <div className="control-group">
+                      <label>Blend Curve</label>
+                      <select
+                        value={options.tilingCurve}
+                        onChange={(e) =>
+                          setOptions({
+                            ...options,
+                            tilingCurve: e.target.value as any,
+                          })
+                        }
+                      >
+                        <option value="linear">Linear</option>
+                        <option value="smooth">Smooth</option>
+                        <option value="cubic">Cubic</option>
+                      </select>
+                    </div>
+                    <div className="control-group">
+                      <label>
+                        Blend Amount{" "}
+                        <span>{options.tilingBlend.toFixed(2)}</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0.01"
+                        max="0.5"
+                        step="0.01"
+                        value={options.tilingBlend}
+                        onChange={(e) =>
+                          setOptions({
+                            ...options,
+                            tilingBlend: parseFloat(e.target.value),
+                          })
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+                <div className="control-group">
+                  <label style={{ flexDirection: "row", alignItems: "center" }}>
+                    Preview Tiled (2x2)
+                    <input
+                      type="checkbox"
+                      checked={showTiled}
+                      onChange={(e) => setShowTiled(e.target.checked)}
+                    />
+                  </label>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="panel">
@@ -414,12 +602,18 @@ export default function App() {
               { name: "Normal Map", key: "normal" },
               { name: "Height Map", key: "height" },
               { name: "Roughness", key: "roughness" },
+              { name: "Metalness", key: "metalness" },
               { name: "Ambient Occlusion", key: "ao" },
+              { name: "Curvature / Edges", key: "curvature" },
             ].map((map) => (
               <div key={map.key} className="map-card">
                 <div className="map-preview" style={{ overflow: "hidden" }}>
                   <canvas
-                    ref={canvasRefs[map.key as keyof typeof canvasRefs]}
+                    ref={(el) => {
+                      (
+                        canvasRefs[map.key as keyof typeof canvasRefs] as any
+                      ).current = el;
+                    }}
                     style={{
                       width: showTiled ? "200%" : "100%",
                       height: showTiled ? "200%" : "100%",

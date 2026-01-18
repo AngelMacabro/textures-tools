@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 
 interface ThreeViewerProps {
   canvasRefs: {
@@ -11,6 +12,8 @@ interface ThreeViewerProps {
     height: React.RefObject<HTMLCanvasElement | null>;
     roughness: React.RefObject<HTMLCanvasElement | null>;
     ao: React.RefObject<HTMLCanvasElement | null>;
+    metalness: React.RefObject<HTMLCanvasElement | null>;
+    curvature: React.RefObject<HTMLCanvasElement | null>;
   };
   prefix: string;
 }
@@ -22,19 +25,33 @@ type GeometryType =
   | "plane"
   | "torus"
   | "cylinder";
+type ViewMode =
+  | "material"
+  | "base"
+  | "normal"
+  | "height"
+  | "roughness"
+  | "metalness"
+  | "ao"
+  | "curvature";
+type EnvMode = "studio" | "outdoor" | "neutral";
 
 export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+
   const [geometryType, setGeometryType] = useState<GeometryType>("sphere");
   const [displacementScale, setDisplacementScale] = useState(0.05);
+  const [tiling, setTiling] = useState(1);
+  const [viewMode, setViewMode] = useState<ViewMode>("material");
+  const [envMode, setEnvMode] = useState<EnvMode>("studio");
 
+  // Initialize Scene
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Scene Setup
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
@@ -42,34 +59,15 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
-    renderer.domElement.style.display = "block";
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.position.set(2, 2, 3);
 
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-    scene.add(ambientLight);
-
-    const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
-    mainLight.position.set(5, 5, 5);
-    scene.add(mainLight);
-
-    const secondaryLight = new THREE.DirectionalLight(0x6366f1, 0.6);
-    secondaryLight.position.set(-5, 0, 2);
-    scene.add(secondaryLight);
-
-    const rimLight = new THREE.PointLight(0xffffff, 0.8);
-    rimLight.position.set(-5, -5, -5);
-    scene.add(rimLight);
-
-    // Controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    // Material
     const material = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       roughness: 1.0,
@@ -77,7 +75,6 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     });
     materialRef.current = material;
 
-    // Animation Loop
     let animationFrameId: number;
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
@@ -86,22 +83,13 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     };
     animate();
 
-    // Resize Handling with ResizeObserver
     const resizeObserver = new ResizeObserver((entries) => {
       if (!entries[0] || !containerRef.current) return;
-
-      const width = Math.floor(entries[0].contentRect.width);
-      const height = Math.floor(entries[0].contentRect.height);
-
-      if (width <= 0 || height <= 0) return;
-
+      const { width, height } = entries[0].contentRect;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
-      renderer.domElement.style.width = "100%";
-      renderer.domElement.style.height = "100%";
     });
-
     resizeObserver.observe(containerRef.current);
 
     return () => {
@@ -109,169 +97,223 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
       cancelAnimationFrame(animationFrameId);
       renderer.dispose();
       controls.dispose();
-      if (
-        containerRef.current &&
-        renderer.domElement.parentNode === containerRef.current
-      ) {
+      if (containerRef.current)
         containerRef.current.removeChild(renderer.domElement);
-      }
     };
   }, []);
+
+  // Handle HDRI Environment
+  useEffect(() => {
+    if (!sceneRef.current || !rendererRef.current) return;
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+
+    // Clear existing environment
+    scene.environment = null;
+    scene.background = null;
+
+    // Remove old lights if any (manual lights are only used in neutral mode)
+    scene.children.forEach((child) => {
+      if (child instanceof THREE.Light) scene.remove(child);
+    });
+
+    if (envMode === "neutral") {
+      const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambient);
+      const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+      sun.position.set(5, 5, 5);
+      scene.add(sun);
+      return;
+    }
+
+    const loader = new RGBELoader();
+    const hdriUrl =
+      envMode === "studio"
+        ? "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/equirectangular/royal_esplanade_1k.hdr"
+        : "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/equirectangular/venice_sunset_1k.hdr";
+
+    loader.load(hdriUrl, (texture) => {
+      const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+      scene.environment = envMap;
+      // scene.background = envMap; // Optional: show HDRI in background
+      texture.dispose();
+      pmremGenerator.dispose();
+    });
+  }, [envMode]);
 
   // Update Geometry
   useEffect(() => {
     if (!sceneRef.current || !materialRef.current) return;
-
     const scene = sceneRef.current;
-
-    // Remove all existing meshes
     scene.children
       .filter((child) => child instanceof THREE.Mesh)
-      .forEach((mesh) => {
-        scene.remove(mesh);
-        if ((mesh as THREE.Mesh).geometry)
-          (mesh as THREE.Mesh).geometry.dispose();
+      .forEach((m) => {
+        scene.remove(m);
+        (m as THREE.Mesh).geometry.dispose();
       });
 
-    let geometry: THREE.BufferGeometry;
+    let geo;
     switch (geometryType) {
       case "sphere":
-        geometry = new THREE.SphereGeometry(1, 256, 256);
+        geo = new THREE.SphereGeometry(1, 256, 256);
         break;
       case "roundedBox":
-        geometry = new RoundedBoxGeometry(1.2, 1.2, 1.2, 12, 0.1);
-        // Box needs more segments for displacement
+        geo = new RoundedBoxGeometry(1.2, 1.2, 1.2, 12, 0.1);
         break;
       case "cube":
-        geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2, 128, 128, 128);
+        geo = new THREE.BoxGeometry(1.2, 1.2, 1.2, 128, 128, 128);
         break;
       case "plane":
-        geometry = new THREE.PlaneGeometry(2, 2, 256, 256);
-        geometry.rotateX(-Math.PI / 2);
+        geo = new THREE.PlaneGeometry(2, 2, 256, 256);
+        geo.rotateX(-Math.PI / 2);
         break;
       case "torus":
-        geometry = new THREE.TorusKnotGeometry(0.7, 0.25, 300, 64);
+        geo = new THREE.TorusKnotGeometry(0.7, 0.25, 300, 64);
         break;
       case "cylinder":
-        geometry = new THREE.CylinderGeometry(0.6, 0.6, 1.5, 64, 128);
+        geo = new THREE.CylinderGeometry(0.6, 0.6, 1.5, 64, 128);
         break;
       default:
-        geometry = new THREE.SphereGeometry(1, 128, 128);
+        geo = new THREE.SphereGeometry(1, 128, 128);
     }
-
-    const mesh = new THREE.Mesh(geometry, materialRef.current);
-    scene.add(mesh);
+    scene.add(new THREE.Mesh(geo, materialRef.current));
   }, [geometryType]);
 
-  // Update textures from canvases
+  // Update Textures
   useEffect(() => {
-    const updateTextures = () => {
+    const update = () => {
       if (!materialRef.current) return;
+      const mat = materialRef.current;
 
-      const setTexture = (
-        type: keyof typeof canvasRefs,
-        property: keyof THREE.MeshStandardMaterial,
+      const setTex = (
+        key: keyof typeof canvasRefs,
+        prop: string,
+        isColor = false,
       ) => {
-        const canvas = canvasRefs[type].current;
-        if (canvas && canvas.width > 0 && canvas.height > 0) {
-          const texture = new THREE.CanvasTexture(canvas);
-          if (property === "map") {
-            texture.colorSpace = THREE.SRGBColorSpace;
-          } else {
-            texture.colorSpace = THREE.NoColorSpace;
-          }
-          texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-          (materialRef.current as any)[property] = texture;
-          materialRef.current!.needsUpdate = true;
+        const can = canvasRefs[key].current;
+        if (can && can.width > 0) {
+          const tex = new THREE.CanvasTexture(can);
+          tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+          tex.repeat.set(tiling, tiling);
+          if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
+          (mat as any)[prop] = tex;
+        } else {
+          (mat as any)[prop] = null;
         }
       };
 
-      setTexture("base", "map");
-      setTexture("normal", "normalMap");
-      setTexture("height", "displacementMap");
-      setTexture("roughness", "roughnessMap");
-      setTexture("ao", "aoMap");
+      // Reset material properties
+      mat.map = null;
+      mat.normalMap = null;
+      mat.displacementMap = null;
+      mat.roughnessMap = null;
+      mat.metalnessMap = null;
+      mat.aoMap = null;
+      mat.emissiveMap = null;
+      mat.color.set(0xffffff);
 
-      materialRef.current.displacementScale = displacementScale;
+      if (viewMode === "material") {
+        setTex("base", "map", true);
+        setTex("normal", "normalMap");
+        setTex("height", "displacementMap");
+        setTex("roughness", "roughnessMap");
+        setTex("metalness", "metalnessMap");
+        setTex("ao", "aoMap");
+        mat.displacementScale = displacementScale;
+      } else {
+        // Channel Isolation mode
+        const mapKey =
+          viewMode === "curvature"
+            ? "curvature"
+            : (viewMode as keyof typeof canvasRefs);
+        setTex(mapKey, "map", viewMode === "base");
+        mat.displacementScale = 0;
+      }
+      mat.needsUpdate = true;
     };
 
-    const interval = setInterval(updateTextures, 1000);
-    return () => clearInterval(interval);
-  }, [canvasRefs, displacementScale]);
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
+  }, [canvasRefs, displacementScale, tiling, viewMode]);
 
   const exportGLB = () => {
     if (!sceneRef.current) return;
-
     const exporter = new GLTFExporter();
-    const scene = sceneRef.current;
-
     exporter.parse(
-      scene,
-      (result) => {
-        const blob = new Blob([result as ArrayBuffer], {
+      sceneRef.current,
+      (res) => {
+        const blob = new Blob([res as ArrayBuffer], {
           type: "application/octet-stream",
         });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `${prefix || "material"}.glb`;
-        link.click();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `${prefix || "material"}.glb`;
+        a.click();
       },
-      (error) => {
-        console.error("An error happened during GLTF export", error);
-      },
+      (err) => console.error(err),
       { binary: true },
     );
   };
 
   return (
     <div className="panel three-viewer-container">
-      <div className="panel-title">
+      <div
+        className="panel-title"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
         <span>3D Material Preview</span>
+        <select
+          value={viewMode}
+          onChange={(e) => setViewMode(e.target.value as ViewMode)}
+          style={{
+            fontSize: "0.7rem",
+            padding: "0.2rem",
+            background: "rgba(0,0,0,0.3)",
+            color: "white",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: "4px",
+          }}
+        >
+          <option value="material">Full Material</option>
+          <option value="base">Base Color</option>
+          <option value="normal">Normal Map</option>
+          <option value="height">Height Map</option>
+          <option value="roughness">Roughness</option>
+          <option value="metalness">Metalness</option>
+          <option value="ao">AO</option>
+          <option value="curvature">Curvature</option>
+        </select>
       </div>
 
       <div className="viewer-toolbar">
-        <button
-          className={`secondary ${geometryType === "sphere" ? "active" : ""}`}
-          onClick={() => setGeometryType("sphere")}
-          title="Sphere"
-        >
-          ⚪
-        </button>
-        <button
-          className={`secondary ${geometryType === "roundedBox" ? "active" : ""}`}
-          onClick={() => setGeometryType("roundedBox")}
-          title="Rounded Box"
-        >
-          🧊
-        </button>
-        <button
-          className={`secondary ${geometryType === "cube" ? "active" : ""}`}
-          onClick={() => setGeometryType("cube")}
-          title="Cube"
-        >
-          📦
-        </button>
-        <button
-          className={`secondary ${geometryType === "torus" ? "active" : ""}`}
-          onClick={() => setGeometryType("torus")}
-          title="Torus Knot"
-        >
-          🥨
-        </button>
-        <button
-          className={`secondary ${geometryType === "cylinder" ? "active" : ""}`}
-          onClick={() => setGeometryType("cylinder")}
-          title="Cylinder"
-        >
-          🧪
-        </button>
-        <button
-          className={`secondary ${geometryType === "plane" ? "active" : ""}`}
-          onClick={() => setGeometryType("plane")}
-          title="Plane"
-        >
-          ⬜
-        </button>
+        {["sphere", "roundedBox", "cube", "torus", "cylinder", "plane"].map(
+          (type) => (
+            <button
+              key={type}
+              className={`secondary ${geometryType === type ? "active" : ""}`}
+              onClick={() => setGeometryType(type as GeometryType)}
+              title={type}
+            >
+              {type === "sphere"
+                ? "⚪"
+                : type === "cube"
+                  ? "📦"
+                  : type === "roundedBox"
+                    ? "🧊"
+                    : type === "torus"
+                      ? "🥨"
+                      : type === "cylinder"
+                        ? "🧪"
+                        : "⬜"}
+            </button>
+          ),
+        )}
       </div>
 
       <div
@@ -284,6 +326,57 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
           background: "#050510",
         }}
       >
+        {/* Environment Control */}
+        <div
+          style={{
+            position: "absolute",
+            top: "1rem",
+            right: "1rem",
+            zIndex: 10,
+            display: "flex",
+            gap: "0.5rem",
+          }}
+        >
+          {["studio", "outdoor", "neutral"].map((env) => (
+            <button
+              key={env}
+              className={`secondary ${envMode === env ? "active" : ""}`}
+              onClick={() => setEnvMode(env as EnvMode)}
+              style={{ fontSize: "0.6rem", padding: "0.3rem 0.6rem" }}
+            >
+              {env.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* Tiling Control */}
+        <div
+          style={{
+            position: "absolute",
+            top: "1rem",
+            left: "1rem",
+            background: "rgba(0,0,0,0.6)",
+            padding: "0.4rem 0.8rem",
+            borderRadius: "10px",
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+          }}
+        >
+          <span style={{ fontSize: "0.6rem", color: "#aaa" }}>Tiling:</span>
+          <input
+            type="range"
+            min="1"
+            max="5"
+            step="1"
+            value={tiling}
+            onChange={(e) => setTiling(parseInt(e.target.value))}
+            style={{ width: "60px", height: "4px" }}
+          />
+          <span style={{ fontSize: "0.6rem", color: "white" }}>{tiling}x</span>
+        </div>
+
         {(!canvasRefs.base.current || canvasRefs.base.current.width === 0) && (
           <div
             style={{
