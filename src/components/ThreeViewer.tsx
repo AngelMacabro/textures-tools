@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
 
 interface ThreeViewerProps {
   canvasRefs: {
@@ -92,13 +92,13 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     });
     resizeObserver.observe(containerRef.current);
 
+    const container = containerRef.current;
     return () => {
       resizeObserver.disconnect();
       cancelAnimationFrame(animationFrameId);
       renderer.dispose();
       controls.dispose();
-      if (containerRef.current)
-        containerRef.current.removeChild(renderer.domElement);
+      if (container) container.removeChild(renderer.domElement);
     };
   }, []);
 
@@ -107,40 +107,54 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     if (!sceneRef.current || !rendererRef.current) return;
     const scene = sceneRef.current;
     const renderer = rendererRef.current;
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    pmremGenerator.compileEquirectangularShader();
 
     // Clear existing environment
     scene.environment = null;
     scene.background = null;
 
-    // Remove old lights if any (manual lights are only used in neutral mode)
-    scene.children.forEach((child) => {
-      if (child instanceof THREE.Light) scene.remove(child);
+    // Remove old lights
+    const lightsToRemove: THREE.Light[] = [];
+    scene.traverse((object) => {
+      if (object instanceof THREE.Light) lightsToRemove.push(object);
     });
+    lightsToRemove.forEach((light) => scene.remove(light));
+
+    // Always add basic lighting as fallback
+    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambient);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+    scene.add(hemi);
 
     if (envMode === "neutral") {
-      const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-      scene.add(ambient);
-      const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+      const sun = new THREE.DirectionalLight(0xffffff, 1.2);
       sun.position.set(5, 5, 5);
       scene.add(sun);
       return;
     }
 
-    const loader = new RGBELoader();
-    const hdriUrl =
-      envMode === "studio"
-        ? "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/equirectangular/royal_esplanade_1k.hdr"
-        : "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/equirectangular/venice_sunset_1k.hdr";
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
 
-    loader.load(hdriUrl, (texture) => {
-      const envMap = pmremGenerator.fromEquirectangular(texture).texture;
-      scene.environment = envMap;
-      // scene.background = envMap; // Optional: show HDRI in background
-      texture.dispose();
-      pmremGenerator.dispose();
-    });
+    const loader = new HDRLoader();
+    const hdriUrl = envMode === "studio" ? "/studio.hdr" : "/outdoor.hdr";
+
+    loader.load(
+      hdriUrl,
+      (texture) => {
+        const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+        scene.environment = envMap;
+        texture.dispose();
+        pmremGenerator.dispose();
+      },
+      undefined,
+      (err) => {
+        console.error("Error loading HDRI:", err);
+        // Fallback sun light if HDRI fails
+        const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+        sun.position.set(2, 4, 3);
+        scene.add(sun);
+      },
+    );
   }, [envMode]);
 
   // Update Geometry
@@ -181,61 +195,93 @@ export default function ThreeViewer({ canvasRefs, prefix }: ThreeViewerProps) {
     scene.add(new THREE.Mesh(geo, materialRef.current));
   }, [geometryType]);
 
-  // Update Textures
+  // Persistent Textures and metadata
+  const texturesRef = useRef<Record<string, THREE.CanvasTexture>>({});
+  const metadataRef = useRef<Record<string, { w: number; h: number }>>({});
+
+  // Update Textures and Material
   useEffect(() => {
-    const update = () => {
+    const updateTextures = () => {
       if (!materialRef.current) return;
       const mat = materialRef.current;
+      mat.color.set(0xffffff);
+      mat.emissive.set(0x000000);
 
-      const setTex = (
+      const updateTex = (
         key: keyof typeof canvasRefs,
         prop: string,
         isColor = false,
       ) => {
-        const can = canvasRefs[key].current;
-        if (can && can.width > 0) {
-          const tex = new THREE.CanvasTexture(can);
-          tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        const canvas = canvasRefs[key].current;
+        if (canvas && canvas.width > 0) {
+          let tex = texturesRef.current[key];
+
+          // Recreate texture if canvas size changed or if it's new
+          const canvasWidth = canvas.width;
+          const canvasHeight = canvas.height;
+
+          const metadata = metadataRef.current[key];
+
+          if (
+            !tex ||
+            tex.image !== canvas ||
+            !metadata ||
+            metadata.w !== canvasWidth ||
+            metadata.h !== canvasHeight
+          ) {
+            if (tex) tex.dispose();
+            tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            metadataRef.current[key] = { w: canvasWidth, h: canvasHeight };
+            texturesRef.current[key] = tex;
+          }
+
           tex.repeat.set(tiling, tiling);
-          if (isColor) tex.colorSpace = THREE.SRGBColorSpace;
-          (mat as any)[prop] = tex;
+          if (isColor) {
+            tex.colorSpace = THREE.SRGBColorSpace;
+          } else {
+            tex.colorSpace = THREE.NoColorSpace;
+          }
+
+          // Notify Three.js that the canvas content might have changed
+          tex.needsUpdate = true;
+          // Use bracket notation with type assertion to reach the properties dynamically
+          (mat as unknown as Record<string, unknown>)[prop] = tex;
         } else {
-          (mat as any)[prop] = null;
+          (mat as unknown as Record<string, unknown>)[prop] = null;
         }
       };
 
-      // Reset material properties
-      mat.map = null;
-      mat.normalMap = null;
-      mat.displacementMap = null;
-      mat.roughnessMap = null;
-      mat.metalnessMap = null;
-      mat.aoMap = null;
-      mat.emissiveMap = null;
-      mat.color.set(0xffffff);
-
       if (viewMode === "material") {
-        setTex("base", "map", true);
-        setTex("normal", "normalMap");
-        setTex("height", "displacementMap");
-        setTex("roughness", "roughnessMap");
-        setTex("metalness", "metalnessMap");
-        setTex("ao", "aoMap");
+        updateTex("base", "map", true);
+        updateTex("normal", "normalMap");
+        updateTex("height", "displacementMap");
+        updateTex("roughness", "roughnessMap");
+        updateTex("metalness", "metalnessMap");
+        updateTex("ao", "aoMap");
         mat.displacementScale = displacementScale;
       } else {
-        // Channel Isolation mode
         const mapKey =
           viewMode === "curvature"
             ? "curvature"
             : (viewMode as keyof typeof canvasRefs);
-        setTex(mapKey, "map", viewMode === "base");
+        // Clear other maps
+        mat.map = null;
+        mat.normalMap = null;
+        mat.displacementMap = null;
+        mat.roughnessMap = null;
+        mat.metalnessMap = null;
+        mat.aoMap = null;
+
+        updateTex(mapKey, "map", viewMode === "base");
         mat.displacementScale = 0;
       }
       mat.needsUpdate = true;
     };
 
-    const timer = setInterval(update, 1000);
-    return () => clearInterval(timer);
+    // Update once per frame or on a fast interval
+    const interval = setInterval(updateTextures, 100);
+    return () => clearInterval(interval);
   }, [canvasRefs, displacementScale, tiling, viewMode]);
 
   const exportGLB = () => {

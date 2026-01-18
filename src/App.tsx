@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import JSZip from "jszip";
 import { MapGenerator } from "./utils/MapGenerator";
 import type { MapOptions } from "./utils/MapGenerator";
@@ -27,15 +27,26 @@ export default function App() {
     delightAmount: 0,
   });
 
-  const canvasRefs = {
-    base: useRef<HTMLCanvasElement>(null),
-    normal: useRef<HTMLCanvasElement>(null),
-    height: useRef<HTMLCanvasElement>(null),
-    roughness: useRef<HTMLCanvasElement>(null),
-    ao: useRef<HTMLCanvasElement>(null),
-    metalness: useRef<HTMLCanvasElement>(null),
-    curvature: useRef<HTMLCanvasElement>(null),
-  };
+  const baseRef = useRef<HTMLCanvasElement>(null);
+  const normalRef = useRef<HTMLCanvasElement>(null);
+  const heightRef = useRef<HTMLCanvasElement>(null);
+  const roughnessRef = useRef<HTMLCanvasElement>(null);
+  const aoRef = useRef<HTMLCanvasElement>(null);
+  const metalnessRef = useRef<HTMLCanvasElement>(null);
+  const curvatureRef = useRef<HTMLCanvasElement>(null);
+
+  const canvasRefs = useMemo(
+    () => ({
+      base: baseRef,
+      normal: normalRef,
+      height: heightRef,
+      roughness: roughnessRef,
+      ao: aoRef,
+      metalness: metalnessRef,
+      curvature: curvatureRef,
+    }),
+    [],
+  );
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -130,7 +141,7 @@ export default function App() {
       if (canvasRefs.curvature.current)
         MapGenerator.putImageData(canvasRefs.curvature.current, curvatureData);
     },
-    [],
+    [canvasRefs],
   );
 
   useEffect(() => {
@@ -143,7 +154,9 @@ export default function App() {
     const canvas = canvasRefs[type].current;
     if (!canvas) return;
     const link = document.createElement("a");
-    const fileName = prefix ? `${prefix}_${type}.png` : `${type}.png`;
+    const fileName = prefix
+      ? `${prefix}_${String(type)}.png`
+      : `${String(type)}.png`;
     link.download = fileName;
     link.href = canvas.toDataURL("image/png");
     link.click();
@@ -162,10 +175,10 @@ export default function App() {
         const canvas = canvasRefs[type].current;
         if (canvas) {
           const blob = await new Promise<Blob | null>((resolve) =>
-            canvas.toBlob((b) => resolve(b), "image/png"),
+            canvas.toBlob((b: Blob | null) => resolve(b), "image/png"),
           );
           if (blob) {
-            folder?.file(`${prefix}_${type}.png`, blob);
+            folder?.file(`${prefix}_${String(type)}.png`, blob);
           }
         }
       }
@@ -490,7 +503,8 @@ export default function App() {
                     onChange={(e) =>
                       setOptions({
                         ...options,
-                        tilingAlgorithm: e.target.value as any,
+                        tilingAlgorithm: e.target
+                          .value as MapOptions["tilingAlgorithm"],
                       })
                     }
                   >
@@ -509,7 +523,8 @@ export default function App() {
                         onChange={(e) =>
                           setOptions({
                             ...options,
-                            tilingCurve: e.target.value as any,
+                            tilingCurve: e.target
+                              .value as MapOptions["tilingCurve"],
                           })
                         }
                       >
@@ -610,8 +625,11 @@ export default function App() {
                 <div className="map-preview" style={{ overflow: "hidden" }}>
                   <canvas
                     ref={(el) => {
+                      const key = map.key as keyof typeof canvasRefs;
                       (
-                        canvasRefs[map.key as keyof typeof canvasRefs] as any
+                        canvasRefs[
+                          key
+                        ] as React.MutableRefObject<HTMLCanvasElement | null>
                       ).current = el;
                     }}
                     style={{

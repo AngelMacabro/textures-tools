@@ -13,6 +13,8 @@ export interface MapOptions {
   isMetallic: boolean;
   metalnessBase: number;
   delightAmount: number;
+  tintColor: string;
+  enableTint: boolean;
 }
 
 export class MapGenerator {
