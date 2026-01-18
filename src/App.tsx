@@ -25,6 +25,8 @@ export default function App() {
     isMetallic: false,
     metalnessBase: 1.0,
     delightAmount: 0,
+    tintColor: "#ffffff",
+    enableTint: false,
   });
 
   const baseRef = useRef<HTMLCanvasElement>(null);
@@ -206,6 +208,8 @@ export default function App() {
         invert: false,
         brightness: 5,
         saturation: 10,
+        enableTint: false,
+        tintColor: "#ffffff",
       },
       Steel: {
         isMetallic: true,
@@ -215,6 +219,8 @@ export default function App() {
         invert: false,
         brightness: 0,
         saturation: -50,
+        enableTint: false,
+        tintColor: "#ffffff",
       },
       Concrete: {
         isMetallic: false,
@@ -224,6 +230,8 @@ export default function App() {
         invert: false,
         brightness: -5,
         saturation: -20,
+        enableTint: false,
+        tintColor: "#ffffff",
       },
       Plastic: {
         isMetallic: false,
@@ -233,6 +241,8 @@ export default function App() {
         invert: false,
         brightness: 0,
         saturation: 0,
+        enableTint: false,
+        tintColor: "#ffffff",
       },
       Wood: {
         isMetallic: false,
@@ -242,6 +252,8 @@ export default function App() {
         invert: false,
         brightness: 0,
         saturation: 10,
+        enableTint: false,
+        tintColor: "#ffffff",
       },
       Fabric: {
         isMetallic: false,
@@ -251,6 +263,8 @@ export default function App() {
         invert: false,
         brightness: 5,
         saturation: 0,
+        enableTint: false,
+        tintColor: "#ffffff",
       },
     };
     if (presets[name]) {
@@ -479,6 +493,48 @@ export default function App() {
                 }
               />
             </div>
+
+            <div className="control-group">
+              <label style={{ flexDirection: "row", alignItems: "center" }}>
+                Enable Tint
+                <input
+                  type="checkbox"
+                  checked={options.enableTint}
+                  onChange={(e) =>
+                    setOptions({ ...options, enableTint: e.target.checked })
+                  }
+                />
+              </label>
+            </div>
+
+            {options.enableTint && (
+              <div className="control-group">
+                <label>Tint Color</label>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "1rem" }}
+                >
+                  <input
+                    type="color"
+                    value={options.tintColor}
+                    onChange={(e) =>
+                      setOptions({ ...options, tintColor: e.target.value })
+                    }
+                    style={{
+                      height: "40px",
+                      width: "60px",
+                      border: "none",
+                      background: "none",
+                      cursor: "pointer",
+                    }}
+                  />
+                  <span
+                    style={{ fontSize: "0.8rem", color: "var(--text-dim)" }}
+                  >
+                    {options.tintColor.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="panel">

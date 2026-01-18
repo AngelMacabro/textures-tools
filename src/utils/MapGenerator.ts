@@ -64,6 +64,17 @@ export class MapGenerator {
     const hue = opts.hue || 0;
     const delight = (opts.delightAmount || 0) / 100;
 
+    // Parse tint color
+    let tr = 255,
+      tg = 255,
+      tb = 255;
+    if (opts.enableTint && opts.tintColor) {
+      const hex = opts.tintColor.replace("#", "");
+      tr = parseInt(hex.substring(0, 2), 16);
+      tg = parseInt(hex.substring(2, 4), 16);
+      tb = parseInt(hex.substring(4, 6), 16);
+    }
+
     const contrastFactor =
       (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
 
@@ -72,7 +83,14 @@ export class MapGenerator {
       let g = data[i + 1];
       let b = data[i + 2];
 
-      // 1. Basic Delighting (Simulated by normalizing highlights)
+      // 0. Apply Tint (Multiplicative)
+      if (opts.enableTint) {
+        r = (r * tr) / 255;
+        g = (g * tg) / 255;
+        b = (b * tb) / 255;
+      }
+
+      // 1. Basic Delighting
       if (delight > 0) {
         const avg = (r + g + b) / 3;
         r = r + (avg - r) * delight * 0.5;
